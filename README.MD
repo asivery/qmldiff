@@ -352,7 +352,7 @@ QMLDiff can be used as a C library. It exports the following functions:
 - `int qmldiff_build_change_files(const char *rootDir)`
     * Loads all the diff files from rootDir
     * Returns the amount of files read
-- `char *qmldiff_process_file(const char *fileName, char *contents)`
+- `char *qmldiff_process_file(const char *fileName, char *contents, size_t contentsLength)`
     * Processes a single QML file using diffs loaded via `qmldiff_build_change_files`
     * Returns NULL in case of an error, or when no changes were performed. Newly allocated string containing the re-emitted QML otherwise
 - `char qmldiff_is_modified(const char *fileName)`
@@ -372,4 +372,3 @@ QMLDiff can be used as a C library. It exports the following functions:
 - [ ] Better emitters - the current ones make the output QML a bit unreadable
 - [ ] New hashtab storage method (TOML is an overkill)
 - [ ] Better method of exporting hashtab when running as a library
-- [ ] Support for exporting the whole QML tree when running as a library

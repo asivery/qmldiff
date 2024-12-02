@@ -1,7 +1,9 @@
 #![allow(dead_code)]
 use hashtab::{hashtab_to_toml_string, merge_toml_file, HashTab};
 use lazy_static::lazy_static;
-use lib_util::{include_if_building_hashtab, is_building_hashtab};
+use lib_util::{
+    extract_tree_node, include_if_building_hashtab, is_building_hashtab, is_extracting_tree,
+};
 use parser::diff::parser::{Change, ObjectToChange};
 use parser::qml;
 use parser::qml::emitter::emit_string;
@@ -97,8 +99,8 @@ pub unsafe extern "C" fn qmldiff_is_modified(file_name: *const c_char) -> bool {
         return file_name.to_lowercase().ends_with(".qml");
     }
 
-    if CHANGES.is_none() {
-        return false;
+    if is_extracting_tree() {
+        return true;
     }
 
     let mut val = false;
@@ -120,10 +122,18 @@ pub unsafe extern "C" fn qmldiff_is_modified(file_name: *const c_char) -> bool {
 pub unsafe extern "C" fn qmldiff_process_file(
     file_name: *const c_char,
     raw_contents: *const c_char,
+    contents_size: usize,
 ) -> *const c_char {
     let file_name: String = CStr::from_ptr(file_name).to_str().unwrap().into();
 
     if include_if_building_hashtab(&file_name, raw_contents) {
+        return std::ptr::null();
+    }
+
+    if extract_tree_node(
+        &file_name,
+        std::slice::from_raw_parts(raw_contents as *const u8, contents_size),
+    ) {
         return std::ptr::null();
     }
 
