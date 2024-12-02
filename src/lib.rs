@@ -16,7 +16,7 @@ use std::{
     ffi::{c_char, CStr, CString},
     sync::Mutex,
 };
-use util::common_util::load_diff_file;
+use util::common_util::{load_diff_file, parse_diff};
 
 mod hash;
 mod hashtab;
@@ -32,8 +32,46 @@ mod util;
 lazy_static! {
     static ref HASHTAB: Mutex<HashTab> = Mutex::new(HashTab::new());
     static ref SLOTS: Mutex<Slots> = Mutex::new(Slots::new());
+    static ref CHANGES: Mutex<Vec<Change>> = Mutex::new(Vec::new());
+    static ref POST_INIT: Mutex<bool> = Mutex::new(false);
 }
-static mut CHANGES: Option<Vec<Change>> = None;
+
+#[no_mangle]
+extern "C" fn qmldiff_add_external_diff(
+    change_file_contents: *const c_char,
+    file_identifier: *const c_char,
+) -> bool {
+    let file_identifier: String = unsafe { CStr::from_ptr(file_identifier) }
+        .to_str()
+        .unwrap()
+        .into();
+
+    if *POST_INIT.lock().unwrap() {
+        eprintln!(
+            "[qmldiff]: Cannot build changes from external {} after init has completed!",
+            &file_identifier
+        );
+    }
+    let change_file_contents: String = unsafe { CStr::from_ptr(change_file_contents) }
+        .to_str()
+        .unwrap()
+        .into();
+    match parse_diff(None, change_file_contents, &HASHTAB.lock().unwrap()) {
+        Err(problem) => {
+            eprintln!(
+                "[qmldiff]: Failed to load external {}: {:?}",
+                &file_identifier, problem
+            );
+            false
+        }
+        Ok(mut contents) => {
+            SLOTS.lock().unwrap().update_slots(&mut contents);
+            eprintln!("[qmldiff]: Loaded external {}", &file_identifier);
+            CHANGES.lock().unwrap().extend(contents);
+            true
+        }
+    }
+}
 
 fn load_hashtab(root_dir: &str) {
     let mut hashtab = HASHTAB.lock().unwrap();
@@ -54,6 +92,13 @@ fn load_hashtab(root_dir: &str) {
 #[no_mangle]
 extern "C" fn qmldiff_build_change_files(root_dir: *const c_char) -> i32 {
     let root_dir: String = unsafe { CStr::from_ptr(root_dir) }.to_str().unwrap().into();
+
+    if *POST_INIT.lock().unwrap() {
+        eprintln!(
+            "[qmldiff]: Cannot build changes from {} after init has completed!",
+            &root_dir
+        );
+    }
     let mut loaded_files = 0i32;
     let mut all_changes = Vec::new();
     let mut slots = Slots::new();
@@ -67,7 +112,11 @@ extern "C" fn qmldiff_build_change_files(root_dir: *const c_char) -> i32 {
             let name: String = file.file_name().into_string().unwrap();
             if name.ends_with(".qmd") {
                 eprintln!("[qmldiff]: Loading file {}", &name);
-                match load_diff_file(&root_dir, file.path(), &HASHTAB.lock().unwrap()) {
+                match load_diff_file(
+                    Some(root_dir.clone()),
+                    file.path(),
+                    &HASHTAB.lock().unwrap(),
+                ) {
                     Err(problem) => {
                         eprintln!("[qmldiff]: Failed to load file {}: {:?}", &name, problem)
                     }
@@ -81,9 +130,8 @@ extern "C" fn qmldiff_build_change_files(root_dir: *const c_char) -> i32 {
         }
     }
 
-    slots.process_slots(&mut all_changes);
     SLOTS.lock().unwrap().0.extend(slots.0);
-    unsafe { CHANGES = Some(all_changes) };
+    CHANGES.lock().unwrap().extend(all_changes);
     loaded_files
 }
 
@@ -103,15 +151,11 @@ pub unsafe extern "C" fn qmldiff_is_modified(file_name: *const c_char) -> bool {
         return true;
     }
 
-    let mut val = false;
-
-    if let Some(ref changes) = CHANGES {
-        val = changes
-            .iter()
-            .any(|e| e.destination == ObjectToChange::File(file_name.clone()));
-    }
-
-    val
+    CHANGES
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|e| e.destination == ObjectToChange::File(file_name.clone()))
 }
 
 #[no_mangle]
@@ -124,6 +168,17 @@ pub unsafe extern "C" fn qmldiff_process_file(
     raw_contents: *const c_char,
     contents_size: usize,
 ) -> *const c_char {
+    let mut post_init = POST_INIT.lock().unwrap();
+    if !*post_init {
+        *post_init = true;
+        SLOTS
+            .lock()
+            .unwrap()
+            .process_slots(&mut CHANGES.lock().unwrap());
+        eprintln!(
+            "[qmldiff]: Was asked to process the first slot. Sealing slots, entering postinit..."
+        );
+    }
     let file_name: String = CStr::from_ptr(file_name).to_str().unwrap().into();
 
     if include_if_building_hashtab(&file_name, raw_contents) {
@@ -137,7 +192,8 @@ pub unsafe extern "C" fn qmldiff_process_file(
         return std::ptr::null();
     }
 
-    if let Some(ref changes) = CHANGES {
+    {
+        let changes = CHANGES.lock().unwrap();
         // It is modified.
         // Build the tree.
         let contents: String = CStr::from_ptr(raw_contents).to_str().unwrap().into();
@@ -151,7 +207,7 @@ pub unsafe extern "C" fn qmldiff_process_file(
                 let slots = &SLOTS.lock().unwrap();
                 let hashtab = &HASHTAB.lock().unwrap();
                 let extensions = QMLDiffExtensions::new(Some(hashtab), Some(slots));
-                match find_and_process(&file_name, &mut tree, changes, extensions, &mut Vec::new())
+                match find_and_process(&file_name, &mut tree, &changes, extensions, &mut Vec::new())
                 {
                     Ok(()) => {
                         let raw_tree = untranslate_from_root(tree);

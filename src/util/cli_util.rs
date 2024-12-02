@@ -130,9 +130,9 @@ fn process_single_diff(
                         tok => tok,
                     })
                     .collect();
-                    TokenType::QMLCode(qml::emitter::flatten_lines(&qml::emitter::emit_token_stream(
-                        &tokens, 0,
-                    )))
+                    TokenType::QMLCode(qml::emitter::flatten_lines(
+                        &qml::emitter::emit_token_stream(&tokens, 0),
+                    ))
                 }
                 e => e,
             })
@@ -181,7 +181,7 @@ pub fn build_change_structures(
         if path.is_file() {
             let root_dir = String::from(path.parent().unwrap().to_string_lossy());
             println!("Reading diff {}...", path.to_string_lossy());
-            let mut this_diff = load_diff_file(&root_dir, path, hashtab)?;
+            let mut this_diff = load_diff_file(Some(root_dir), path, hashtab)?;
             slots.update_slots(&mut this_diff);
             all_changes.extend(this_diff);
         } else if path.is_dir() {
@@ -191,7 +191,7 @@ pub fn build_change_structures(
                     continue;
                 }
                 println!("Reading diff {}...", sub_file_path.to_string_lossy());
-                let mut this_diff = load_diff_file(path_str, sub_file_path, hashtab)?;
+                let mut this_diff = load_diff_file(Some(path_str.clone()), sub_file_path, hashtab)?;
                 slots.update_slots(&mut this_diff);
                 all_changes.extend(this_diff);
             }
