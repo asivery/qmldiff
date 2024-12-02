@@ -200,7 +200,7 @@ fn find_first_matching_child(root: &TreeRoot, tree: &Vec<NodeSelector>) -> Resul
         _ => {}
     }
 
-    Err(Error::msg(format!("Cannot LOCATE {:?} in root {:?}", tree, root)))
+    Err(Error::msg(format!("Cannot LOCATE {:?}", tree)))
 }
 
 fn insert_into_root(
@@ -414,12 +414,14 @@ pub fn process(
                 let root = unambiguous_root!();
                 let element_idx = find_first_matching_child(root, &rename.selector)?;
                 match root {
-                    TreeRoot::Enum(_) => return Err(Error::msg("Cannot RENAME a value within an enum!")),
+                    TreeRoot::Enum(_) => {
+                        return Err(Error::msg("Cannot RENAME a value within an enum!"))
+                    }
                     TreeRoot::Object(obj) => {
                         obj.borrow_mut().children[element_idx].set_name(rename.name_to.clone())?;
                     }
                 }
-                current_root.cursor = Some(element_idx+1);
+                current_root.cursor = Some(element_idx + 1);
             }
             FileChangeAction::Remove(selector) => {
                 // Root must be unambiguous

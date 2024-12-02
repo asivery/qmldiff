@@ -300,7 +300,7 @@ impl<'a> Parser<'a> {
                     let name = self.next_string_or_id()?;
                     Ok(FileChangeAction::Rename(RenameAction {
                         name_to: name,
-                        selector: node
+                        selector: node,
                     }))
                 }
                 Keyword::Insert => {

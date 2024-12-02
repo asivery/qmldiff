@@ -104,10 +104,10 @@ pub struct Lexer<'a> {
     line_pos: usize,
 }
 
-enum CollectionType{
+enum CollectionType {
     Break,
     Include,
-    Drop
+    Drop,
 }
 
 impl From<bool> for CollectionType {
@@ -153,7 +153,7 @@ impl<'a> Lexer<'a> {
                 CollectionType::Break => break,
                 CollectionType::Drop => {
                     self.advance();
-                },
+                }
                 CollectionType::Include => {
                     result.push(c);
                     self.advance();
