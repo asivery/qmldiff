@@ -228,13 +228,13 @@ Rectangle {
 ```
 
 
-#### `DELETE <node>`
+#### `REMOVE <node>`
 
 Deletes all children matching the `<node>` selector from the current root.
 
 #### `REPLACE <node> WITH { QML }`
 
-This statement can be treated as a combination of the `LOCATE`, `DELETE` and `INSERT` statements.
+This statement can be treated as a combination of the `LOCATE`, `REMOVE` and `INSERT` statements.
 It locates the first child matching the `<node>` selector within the current root, deletes it, then inserts
 the QML code provided at that spot.
 
