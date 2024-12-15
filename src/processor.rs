@@ -98,6 +98,9 @@ fn locate_in_tree(roots: Vec<TreeRoot>, tree: &NodeTree) -> Vec<TreeRoot> {
                         TranslatedObjectChild::Object(obj) => {
                             Some((None, TreeRoot::Object(obj.clone())))
                         }
+                        TranslatedObjectChild::ObjectProperty(obj) => {
+                            Some((Some(&obj.name), TreeRoot::Object(obj.default_value.clone())))
+                        }
                         TranslatedObjectChild::Component(asi)
                         | TranslatedObjectChild::ObjectAssignment(asi) => {
                             Some((Some(&asi.name), TreeRoot::Object(asi.value.clone())))

@@ -25,9 +25,9 @@ pub struct SignalChild {
 }
 
 #[derive(Debug, PartialEq, Eq)]
-pub struct PropertyChild {
+pub struct PropertyChild<T> {
     pub name: String,
-    pub default_value: Option<AssignmentChildValue>,
+    pub default_value: T,
     pub modifiers: Vec<Keyword>,
     pub r#type: String,
 }
@@ -78,7 +78,8 @@ pub struct ComponentDefinition {
 #[derive(Debug)]
 pub enum ObjectChild {
     Signal(SignalChild),
-    Property(PropertyChild),
+    Property(PropertyChild<Option<AssignmentChildValue>>),
+    ObjectProperty(PropertyChild<Object>),
     Assignment(AssignmentChild),
     ObjectAssignment(ObjectAssignmentChild),
     Function(FunctionChild),
@@ -99,6 +100,7 @@ impl<'a> ObjectChild {
             ObjectChild::Function(fnc) => Some(&fnc.name),
             ObjectChild::Object(_) => None,
             ObjectChild::Property(prop) => Some(&prop.name),
+            ObjectChild::ObjectProperty(prop) => Some(&prop.name),
             ObjectChild::Signal(signal) => Some(&signal.name),
         }
     }
@@ -123,6 +125,7 @@ impl<'a> ObjectChild {
                 }
                 _ => None,
             },
+            ObjectChild::ObjectProperty(_) => None,
             ObjectChild::Signal(_) => None,
         }
     }
@@ -713,12 +716,28 @@ impl Parser {
                                     }
                                     _ => None,
                                 };
-                                object.children.push(ObjectChild::Property(PropertyChild {
-                                    name,
-                                    default_value,
-                                    modifiers,
-                                    r#type,
-                                }));
+                                match default_value {
+                                    Some(AssignmentChildValue::Object(default_object)) => {
+                                        object.children.push(ObjectChild::ObjectProperty(
+                                            PropertyChild {
+                                                name,
+                                                default_value: default_object,
+                                                modifiers,
+                                                r#type,
+                                            },
+                                        ));
+                                    }
+                                    _ => {
+                                        object.children.push(ObjectChild::Property(
+                                            PropertyChild {
+                                                name,
+                                                default_value,
+                                                modifiers,
+                                                r#type,
+                                            },
+                                        ));
+                                    }
+                                }
                             }
                             _ => {
                                 return error_received_expected!(

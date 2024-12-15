@@ -26,7 +26,8 @@ pub struct TranslatedObjectAssignmentChild {
 #[derive(Debug)]
 pub enum TranslatedObjectChild {
     Signal(SignalChild),
-    Property(PropertyChild),
+    Property(PropertyChild<Option<AssignmentChildValue>>),
+    ObjectProperty(PropertyChild<TranslatedObjectRef>),
     Assignment(AssignmentChild),
     ObjectAssignment(TranslatedObjectAssignmentChild),
     Function(FunctionChild),
@@ -56,6 +57,7 @@ impl<'a> TranslatedObjectChild {
             TranslatedObjectChild::Function(fnc) => Some(&fnc.name),
             TranslatedObjectChild::Object(_) => None,
             TranslatedObjectChild::Property(prop) => Some(&prop.name),
+            TranslatedObjectChild::ObjectProperty(prop) => Some(&prop.name),
             TranslatedObjectChild::Signal(signal) => Some(&signal.name),
         }
     }
@@ -80,6 +82,7 @@ impl<'a> TranslatedObjectChild {
                 }
                 _ => None,
             },
+            TranslatedObjectChild::ObjectProperty(_) => None,
             TranslatedObjectChild::Signal(_) => None,
         }
     }
@@ -96,6 +99,7 @@ impl<'a> TranslatedObjectChild {
             TranslatedObjectChild::Function(func) => func.name = name,
             TranslatedObjectChild::Object(_) => return error!(),
             TranslatedObjectChild::Property(prop) => prop.name = name,
+            TranslatedObjectChild::ObjectProperty(prop) => prop.name = name,
             TranslatedObjectChild::Signal(sig) => sig.name = name,
             TranslatedObjectChild::ObjectAssignment(asi) => asi.name = name,
             TranslatedObjectChild::Enum(enu) => enu.name = name,
@@ -116,6 +120,14 @@ pub fn translate_object_child(child: ObjectChild) -> TranslatedObjectChild {
             TranslatedObjectChild::ObjectAssignment(TranslatedObjectAssignmentChild {
                 name: z.name,
                 value: translate(z.value),
+            })
+        }
+        ObjectChild::ObjectProperty(z) => {
+            TranslatedObjectChild::ObjectProperty(PropertyChild::<TranslatedObjectRef> {
+                name: z.name,
+                default_value: translate(z.default_value),
+                modifiers: z.modifiers,
+                r#type: z.r#type,
             })
         }
         ObjectChild::Component(z) => {
@@ -163,6 +175,14 @@ pub fn untranslate(object: TranslatedObjectRef) -> Object {
                     ObjectChild::Component(ComponentDefinition {
                         name: z.name,
                         object: untranslate(z.value),
+                    })
+                }
+                TranslatedObjectChild::ObjectProperty(z) => {
+                    ObjectChild::ObjectProperty(PropertyChild::<Object> {
+                        name: z.name,
+                        default_value: untranslate(z.default_value),
+                        modifiers: z.modifiers,
+                        r#type: z.r#type,
                     })
                 }
                 TranslatedObjectChild::ObjectAssignment(z) => {

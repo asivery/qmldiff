@@ -2,7 +2,9 @@ use std::fmt::Display;
 
 use super::{
     lexer::TokenType,
-    parser::{AssignmentChildValue, Import, Object, ObjectChild, Pragma, TreeElement},
+    parser::{
+        AssignmentChildValue, Import, Object, ObjectChild, Pragma, PropertyChild, TreeElement,
+    },
 };
 
 #[derive(Debug, Clone)]
@@ -118,6 +120,15 @@ fn emit_assignment_child_value(value: &AssignmentChildValue, indent: usize) -> V
     }
 }
 
+fn emit_property_prologue<T>(prop: &PropertyChild<T>) -> String {
+    let modifiers: String = prop
+        .modifiers
+        .iter()
+        .map(|k| Into::<String>::into(k.clone()))
+        .fold(String::new(), |a, b| a + &b + " ");
+    format!("{} {} {}", modifiers, prop.r#type, prop.name)
+}
+
 pub fn emit_object(object: &Object, indent: usize) -> Vec<Line> {
     let root_line = Line {
         text: format!("{} {{", object.name),
@@ -199,12 +210,7 @@ pub fn emit_object(object: &Object, indent: usize) -> Vec<Line> {
                 lines.extend(emit_object(object, indent));
             }
             ObjectChild::Property(prop) => {
-                let modifiers: String = prop
-                    .modifiers
-                    .iter()
-                    .map(|k| Into::<String>::into(k.clone()))
-                    .fold(String::new(), |a, b| a + &b + " ");
-                let mut line = format!("{} {} {}", modifiers, prop.r#type, prop.name);
+                let mut line = emit_property_prologue(&prop);
                 if let Some(default) = &prop.default_value {
                     let new_lines = emit_assignment_child_value(default, indent);
                     line += ": ";
@@ -214,6 +220,14 @@ pub fn emit_object(object: &Object, indent: usize) -> Vec<Line> {
                 } else {
                     lines.push(Line { text: line, indent });
                 }
+            }
+            ObjectChild::ObjectProperty(prop) => {
+                let mut line = emit_property_prologue(&prop);
+                let new_lines = emit_object(&prop.default_value, indent);
+                line += ": ";
+                line += &new_lines[0].text;
+                lines.push(Line { text: line, indent });
+                lines.extend_from_slice(&new_lines[1..]);
             }
             ObjectChild::Signal(sig) => {
                 let mut line = format!("signal {}", sig.name);

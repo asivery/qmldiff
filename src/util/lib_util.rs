@@ -1,5 +1,7 @@
 use std::{
-    ffi::{c_char, CStr}, fs::create_dir_all, path::Path
+    ffi::{c_char, CStr},
+    fs::create_dir_all,
+    path::Path,
 };
 
 use crate::{hash::hash, hashtab::update_hashtab_from_tree, HASHTAB};
@@ -55,7 +57,10 @@ pub fn extract_tree_node(tree_path: &str, data: &[u8]) -> bool {
                 x
             );
         } else {
-            eprintln!("[qmldiff]: Resource {} extracted", final_path.to_string_lossy());
+            eprintln!(
+                "[qmldiff]: Resource {} extracted",
+                final_path.to_string_lossy()
+            );
         }
 
         true
