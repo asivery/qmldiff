@@ -28,14 +28,14 @@ fn build_recursive_hashmap(directory: &String, dir_relative_name: &String, tab: 
     for file in read_dir(directory).unwrap().flatten() {
         let t = file.file_type().unwrap();
         let name = file.file_name().into_string().unwrap();
+        let mut relative_name = dir_relative_name.clone();
+        relative_name.push('/');
+        relative_name.push_str(&name);
+        let hash = hash(&relative_name);
+        tab.insert(hash, relative_name);
         if t.is_file() {
             if name.ends_with(".qml") {
                 println!("Hashing {}", file.path().to_str().unwrap());
-                let mut relative_name = dir_relative_name.clone();
-                relative_name.push('/');
-                relative_name.push_str(&name);
-                let hash = hash(&relative_name);
-                tab.insert(hash, relative_name);
                 let lexer = qml::lexer::Lexer::new(
                     std::fs::read_to_string(file.path()).unwrap(),
                     None,
@@ -109,6 +109,21 @@ fn process_single_diff(
                         TokenType::Identifier(id)
                     }
                 }
+                TokenType::String(string) => {
+                    if string.len() > 2 && inv_hashtab.contains_key(&string[1..string.len() - 1]) {
+                        // Hashing force-converts into Identifiers.
+                        // This is an intermediary form, so even if it
+                        // goes against the spec, it's not an issue
+                        TokenType::Identifier(format!(
+                            "[[{}{}]]",
+                            string.chars().nth(0).unwrap(),
+                            inv_hashtab.get(&string[1..string.len() - 1]).unwrap()
+                        ))
+                    } else {
+                        // Do not translate
+                        TokenType::String(string)
+                    }
+                }
                 TokenType::QMLCode(qml) => {
                     // Parse into tokens
                     let tokens = qml::lexer::Lexer::new(
@@ -125,6 +140,21 @@ fn process_single_diff(
                                 ))
                             } else {
                                 qml::lexer::TokenType::Identifier(id)
+                            }
+                        }
+                        qml::lexer::TokenType::String(string) => {
+                            if string.len() > 2
+                                && inv_hashtab.contains_key(&string[1..string.len() - 1])
+                            {
+                                // See comment above
+                                qml::lexer::TokenType::Identifier(format!(
+                                    "~&{}{}&~",
+                                    string.chars().nth(0).unwrap(),
+                                    inv_hashtab.get(&string[1..string.len() - 1]).unwrap()
+                                ))
+                            } else {
+                                // Do not translate
+                                qml::lexer::TokenType::String(string)
                             }
                         }
                         tok => tok,

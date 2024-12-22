@@ -204,13 +204,22 @@ impl<'a> Lexer<'a> {
                     });
 
                     self.advance(); // Consume closing quote
-                    Ok(TokenType::String(string))
+                    Ok(TokenType::String(if quote == '`' {
+                        string
+                    } else {
+                        format!("{}{}{}", quote, string, quote)
+                    }))
                 }
 
                 '[' if self.input[self.position+1..].starts_with('[') => {
                     // [[HASH]]
                     self.advance();
                     self.advance();
+                    // String hashing:
+                    let string_quote: Option<char> = match self.peek() {
+                        Some('\'') | Some('"') | Some('`') => self.advance(),
+                        _ => None
+                    };
                     let hash = self.collect_while(|_, c| c.is_ascii_digit().into());
                     let a = self.peek();
                     self.advance();
@@ -223,7 +232,13 @@ impl<'a> Lexer<'a> {
                     let hash = hash.parse::<u64>().unwrap();
                     let resolved_string = self.hashtab.get(&hash);
                     match resolved_string {
-                        Some(string) => Ok(TokenType::Identifier(string.clone())),
+                        Some(string) => {
+                            if let Some(string_quote) = string_quote {
+                                Ok(TokenType::String(format!("{}{}{}", string_quote, string, string_quote)))
+                            } else {
+                                Ok(TokenType::Identifier(string.clone()))
+                            }
+                        },
                         None => Err(Error::msg(format!("Cannot resolve hash {}", hash))),
                     }
                 }

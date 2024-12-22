@@ -14,8 +14,16 @@ pub type InvHashTab = HashMap<String, u64>;
 
 fn hash_token_stream(hashtab: &mut HashTab, tokens: &Vec<TokenType>) {
     for token in tokens {
-        if let TokenType::Identifier(id) = token {
-            hashtab.insert(hash(id), id.clone());
+        match token {
+            TokenType::Identifier(id) => {
+                hashtab.insert(hash(id), id.clone());
+            }
+            TokenType::String(str) => {
+                // Remove the quotes around the string:
+                let contents = &str[1..str.len() - 1];
+                hashtab.insert(hash(contents), contents.to_string());
+            }
+            _ => {}
         }
     }
 }
@@ -66,7 +74,11 @@ fn update_hashtab(hashtab: &mut HashTab, qml_obj: &Object) {
                     _ => {}
                 }
             }
-            _ => {}
+            ObjectChild::ObjectProperty(prop) => {
+                include!(&prop.name);
+                update_hashtab(hashtab, &prop.default_value);
+            }
+            ObjectChild::Abstract(_) => {}
         }
     }
 }
@@ -89,15 +101,15 @@ where
 {
     let mut data_file = File::open(hashtab_file)?;
     loop {
-        let mut hash_value = [0u8;8];
-        let mut str_len = [0u8;4];
+        let mut hash_value = [0u8; 8];
+        let mut str_len = [0u8; 4];
         if let Err(_) = data_file.read_exact(&mut hash_value) {
             break;
         }
         data_file.read_exact(&mut str_len)?;
         let str_len_int = u32::from_be_bytes(str_len) as usize;
         let hash_value_int = u64::from_be_bytes(hash_value);
-        let mut str_content = vec![0u8;str_len_int];
+        let mut str_content = vec![0u8; str_len_int];
         data_file.read_exact(&mut str_content)?;
         if hash_value_int != 0 {
             let str: String = String::from_utf8_lossy(&str_content).into();

@@ -202,6 +202,9 @@ impl<'a> Lexer<'a> {
             match c {
                 // Cannot use [[hash]] - it's valid JS
                 // For hashes here, ~&hash&~ will be used.
+                // For hashed string: ~&[q]hash&~
+                // where [q] is one of `, ', "
+                // Example: ~&'1234&~
                 '~' if self.peek_offset(1) == Some('&')
                     && self.extensions.is_some()
                     && self.extensions.as_ref().unwrap().hashtab.is_some() =>
@@ -209,6 +212,12 @@ impl<'a> Lexer<'a> {
                     // HASH!
                     self.advance();
                     self.advance();
+                    // If string_quote is None, that means we're not dealing
+                    // with a string, and should proceed normally.
+                    let string_quote: Option<char> = match self.peek() {
+                        Some('\'') | Some('"') | Some('`') => self.advance(),
+                        _ => None,
+                    };
                     let hash_str =
                         self.collect_while(|this, c| c != '&' && this.peek_offset(1) != Some('~'));
                     self.advance(); // Remove &
@@ -222,7 +231,16 @@ impl<'a> Lexer<'a> {
                         .unwrap()
                         .get(&hash)
                     {
-                        Ok(TokenType::Identifier(resolved.clone()))
+                        if let Some(quote) = string_quote {
+                            Ok(TokenType::String(format!(
+                                "{}{}{}",
+                                quote,
+                                resolved.clone(),
+                                quote
+                            )))
+                        } else {
+                            Ok(TokenType::Identifier(resolved.clone()))
+                        }
                     } else {
                         Err(Error::msg(format!(
                             "Cannot dereference hash {} - not found in hashtab",

@@ -707,14 +707,15 @@ impl Parser {
                                 // Next come the type and name
                                 let mut name = self.next_typed_id()?;
                                 self.discard_whitespace();
-                                let r#type = if let Some(TokenType::Identifier(_)) = self.stream.peek() {
-                                    let r#type = name;
-                                    name = self.next_id(true)?;
-                                    self.discard_whitespace();
-                                    Some(r#type)
-                                } else {
-                                    None
-                                };
+                                let r#type =
+                                    if let Some(TokenType::Identifier(_)) = self.stream.peek() {
+                                        let r#type = name;
+                                        name = self.next_id(true)?;
+                                        self.discard_whitespace();
+                                        Some(r#type)
+                                    } else {
+                                        None
+                                    };
                                 let default_value = match self.stream.peek() {
                                     Some(TokenType::Symbol(':')) => {
                                         self.stream.next(); // Advance past the symbol
