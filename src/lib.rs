@@ -1,5 +1,5 @@
 #![allow(dead_code)]
-use hashtab::{hashtab_to_toml_string, merge_toml_file, HashTab};
+use hashtab::{serialize_hashtab, merge_hash_file, HashTab};
 use lazy_static::lazy_static;
 use lib_util::{
     extract_tree_node, include_if_building_hashtab, is_building_hashtab, is_extracting_tree,
@@ -75,7 +75,7 @@ extern "C" fn qmldiff_add_external_diff(
 
 fn load_hashtab(root_dir: &str) {
     let mut hashtab = HASHTAB.lock().unwrap();
-    if let Err(x) = merge_toml_file(
+    if let Err(x) = merge_hash_file(
         std::path::Path::new(&root_dir).join("hashtab"),
         &mut hashtab,
         None,
@@ -241,7 +241,7 @@ pub extern "C" fn qmldiff_start_saving_thread() {
                             continue;
                         }
                     };
-                    let string = hashtab_to_toml_string(&hashtab);
+                    let string = serialize_hashtab(&hashtab);
                     if let Err(e) = std::fs::write(&dist_hashmap_path, string) {
                         eprintln!(
                             "[qmldiff]: Cannot write to {}: {}",

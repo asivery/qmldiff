@@ -1,5 +1,5 @@
-use anyhow::{Error, Result};
-use std::{collections::HashMap, path::Path};
+use anyhow::Result;
+use std::{collections::HashMap, fs::File, io::Read, path::Path};
 
 use crate::{
     hash::hash,
@@ -79,40 +79,50 @@ pub fn update_hashtab_from_tree(qml: &QMLTree, hashtab: &mut HashTab) {
     }
 }
 
-pub fn merge_toml_file<P>(
-    toml_file: P,
+pub fn merge_hash_file<P>(
+    hashtab_file: P,
     destination: &mut HashTab,
     mut inv_destination: Option<&mut InvHashTab>,
 ) -> Result<()>
 where
     P: AsRef<Path>,
 {
-    let hashtab_raw: HashMap<String, String> =
-        toml::from_str(&std::fs::read_to_string(toml_file)?)?;
-
-    for (key, val) in hashtab_raw {
-        match key.parse::<u64>() {
-            Ok(u64key) => {
-                if let Some(ref mut inv) = inv_destination {
-                    inv.insert(val.clone(), u64key);
-                }
-                destination.insert(u64key, val);
+    let mut data_file = File::open(hashtab_file)?;
+    loop {
+        let mut hash_value = [0u8;8];
+        let mut str_len = [0u8;4];
+        if let Err(_) = data_file.read_exact(&mut hash_value) {
+            break;
+        }
+        data_file.read_exact(&mut str_len)?;
+        let str_len_int = u32::from_be_bytes(str_len) as usize;
+        let hash_value_int = u64::from_be_bytes(hash_value);
+        let mut str_content = vec![0u8;str_len_int];
+        data_file.read_exact(&mut str_content)?;
+        if hash_value_int != 0 {
+            let str: String = String::from_utf8_lossy(&str_content).into();
+            if let Some(ref mut rev) = inv_destination {
+                rev.insert(str.clone(), hash_value_int);
             }
-            Err(e) => {
-                return Err(Error::from(e));
-            }
+            destination.insert(hash_value_int, str);
         }
     }
-
     Ok(())
 }
 
-pub fn hashtab_to_toml_string(hashtab: &HashTab) -> String {
-    toml::to_string(
-        &hashtab
-            .iter()
-            .map(|(a, b)| (a.to_string(), b.clone()))
-            .collect::<HashMap<String, String>>(),
-    )
-    .unwrap()
+pub fn serialize_hashtab(hashtab: &HashTab) -> Vec<u8> {
+    let mut output = Vec::new();
+    {
+        let magic_string = "Hashtab file for QMLDIFF. Do not edit.".bytes();
+        output.extend(0u64.to_be_bytes());
+        output.extend((magic_string.len() as u32).to_be_bytes());
+        output.extend(magic_string);
+    }
+    for (hash, str) in hashtab {
+        output.extend(hash.to_be_bytes());
+        let bytes = str.bytes();
+        output.extend((str.len() as u32).to_be_bytes());
+        output.extend(bytes);
+    }
+    output
 }

@@ -3,7 +3,7 @@ use std::fs::{create_dir, remove_dir_all};
 
 use clap::{Parser, Subcommand};
 use cli_util::{apply_changes, build_change_structures, process_diff_tree, start_hashmap_build};
-use hashtab::{hashtab_to_toml_string, merge_toml_file, HashTab, InvHashTab};
+use hashtab::{merge_hash_file, serialize_hashtab, HashTab, InvHashTab};
 use slots::Slots;
 
 #[path = "util/cli_util.rs"]
@@ -82,10 +82,10 @@ fn main() {
             hashtab_name,
         } => {
             let hashtab = start_hashmap_build(qml_root_path);
-            let hashtab_string = hashtab_to_toml_string(&hashtab);
+            let hashtab_data = serialize_hashtab(&hashtab);
             std::fs::write(
                 hashtab_name,
-                "### Hashtab file for QMLDIFF ###\n\n".to_string() + &hashtab_string,
+                hashtab_data,
             )
             .unwrap()
         }
@@ -96,7 +96,7 @@ fn main() {
         } => {
             let mut hashtab_value = HashTab::new();
             let mut inv_hashtab = InvHashTab::new();
-            merge_toml_file(hashtab, &mut hashtab_value, Some(&mut inv_hashtab)).unwrap();
+            merge_hash_file(hashtab, &mut hashtab_value, Some(&mut inv_hashtab)).unwrap();
             process_diff_tree(diff_list, &hashtab_value, &inv_hashtab, !*revert);
         }
         Commands::ApplyDiffs {
@@ -108,7 +108,7 @@ fn main() {
             clean,
         } => {
             let mut hashtab_value = HashTab::new();
-            merge_toml_file(hashtab, &mut hashtab_value, None).unwrap();
+            merge_hash_file(hashtab, &mut hashtab_value, None).unwrap();
             if *clean {
                 // Ignore result
                 {
