@@ -83,11 +83,7 @@ fn main() {
         } => {
             let hashtab = start_hashmap_build(qml_root_path);
             let hashtab_data = serialize_hashtab(&hashtab);
-            std::fs::write(
-                hashtab_name,
-                hashtab_data,
-            )
-            .unwrap()
+            std::fs::write(hashtab_name, hashtab_data).unwrap()
         }
         Commands::HashDiffs {
             hashtab,

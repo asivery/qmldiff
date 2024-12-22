@@ -1,5 +1,5 @@
 #![allow(dead_code)]
-use hashtab::{serialize_hashtab, merge_hash_file, HashTab};
+use hashtab::{merge_hash_file, serialize_hashtab, HashTab};
 use lazy_static::lazy_static;
 use lib_util::{
     extract_tree_node, include_if_building_hashtab, is_building_hashtab, is_extracting_tree,
