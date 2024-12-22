@@ -29,7 +29,7 @@ pub struct PropertyChild<T> {
     pub name: String,
     pub default_value: T,
     pub modifiers: Vec<Keyword>,
-    pub r#type: String,
+    pub r#type: Option<String>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -705,10 +705,16 @@ impl Parser {
                                     self.discard_whitespace();
                                 }
                                 // Next come the type and name
-                                // TODO: Type is optional :')
-                                let r#type = self.next_typed_id()?;
-                                let name = self.next_id(true)?;
+                                let mut name = self.next_typed_id()?;
                                 self.discard_whitespace();
+                                let r#type = if let Some(TokenType::Identifier(_)) = self.stream.peek() {
+                                    let r#type = name;
+                                    name = self.next_id(true)?;
+                                    self.discard_whitespace();
+                                    Some(r#type)
+                                } else {
+                                    None
+                                };
                                 let default_value = match self.stream.peek() {
                                     Some(TokenType::Symbol(':')) => {
                                         self.stream.next(); // Advance past the symbol
@@ -768,11 +774,11 @@ impl Parser {
         self.discard_whitespace();
         // HACK:
         if let Some(TokenType::Identifier(potential_on)) = self.stream.peek() {
-            if id == "Binding" && potential_on == "on" {
-                // This is a conditional binding.
+            if potential_on == "on" {
+                // This is a conditional binding / animation.
                 // Swap ids
                 self.stream.next();
-                id = "Binding on ".to_string() + &self.next_id(true)?;
+                id = format!("{} on ", id) + &self.next_id(true)?;
             }
         }
         self.discard_whitespace();

@@ -126,7 +126,11 @@ fn emit_property_prologue<T>(prop: &PropertyChild<T>) -> String {
         .iter()
         .map(|k| Into::<String>::into(k.clone()))
         .fold(String::new(), |a, b| a + &b + " ");
-    format!("{} {} {}", modifiers, prop.r#type, prop.name)
+    if let Some(r#type) = &prop.r#type {
+        format!("{} {} {}", modifiers, r#type, prop.name)
+    } else {
+        format!("{} {}", modifiers, prop.name)
+    }
 }
 
 pub fn emit_object(object: &Object, indent: usize) -> Vec<Line> {
@@ -277,7 +281,11 @@ pub fn emit(objects: &Vec<TreeElement>) -> Vec<Line> {
 }
 
 pub fn flatten_lines(lines: &[Line]) -> String {
-    lines.iter().map(|e| e.to_string() + "\n").collect()
+    lines
+        .iter()
+        .enumerate()
+        .map(|(i, l)| (if i == 0 { "" } else { "\n" }).to_string() + &l.to_string())
+        .collect()
 }
 
 pub fn emit_string(objects: &Vec<TreeElement>) -> String {
