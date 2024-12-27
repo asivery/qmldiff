@@ -40,6 +40,16 @@ enum Commands {
         #[arg(default_value = "hashtab")]
         hashtab_name: String,
     },
+    /// Dump the contents of a hashtab in a human-readable form
+    DumpHashtab {
+        /// The path to the hashtab
+        hashtab: String,
+    },
+    /// Hash a string
+    HashString {
+        /// The string to hash
+        string: String,
+    },
     /// Hash the diffs for a given hashtab
     HashDiffs {
         /// The hashtab to use
@@ -84,6 +94,16 @@ fn main() {
             let hashtab = start_hashmap_build(qml_root_path);
             let hashtab_data = serialize_hashtab(&hashtab);
             std::fs::write(hashtab_name, hashtab_data).unwrap()
+        }
+        Commands::DumpHashtab { hashtab } => {
+            let mut tab = HashTab::new();
+            merge_hash_file(hashtab, &mut tab, None).unwrap();
+            for (i, v) in tab {
+                println!("{} = {}", v, i);
+            }
+        }
+        Commands::HashString { string } => {
+            println!("hash({}) = {}", string, hash(string));
         }
         Commands::HashDiffs {
             hashtab,
