@@ -31,6 +31,7 @@ fn build_recursive_hashmap(directory: &String, dir_relative_name: &String, tab: 
         let mut relative_name = dir_relative_name.clone();
         relative_name.push('/');
         relative_name.push_str(&name);
+        tab.insert(hash(&name), name.clone());
         let hash = hash(&relative_name);
         tab.insert(hash, relative_name);
         if t.is_file() {

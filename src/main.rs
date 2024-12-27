@@ -3,12 +3,15 @@ use std::fs::{create_dir, remove_dir_all};
 
 use clap::{Parser, Subcommand};
 use cli_util::{apply_changes, build_change_structures, process_diff_tree, start_hashmap_build};
+use hash::hash;
+use hashrules::HashRules;
 use hashtab::{merge_hash_file, serialize_hashtab, HashTab, InvHashTab};
 use slots::Slots;
 
 #[path = "util/cli_util.rs"]
 mod cli_util;
 mod hash;
+mod hashrules;
 mod hashtab;
 mod parser;
 mod processor;
@@ -36,6 +39,9 @@ enum Commands {
     CreateHashtab {
         /// The root path of the QML
         qml_root_path: String,
+        /// The name of the rules file to pa
+        #[arg(default_value = None, required = false, long)]
+        hashrules_name: Option<String>,
         /// The name of the hashtab to create
         #[arg(default_value = "hashtab")]
         hashtab_name: String,
@@ -90,8 +96,18 @@ fn main() {
         Commands::CreateHashtab {
             qml_root_path,
             hashtab_name,
+            hashrules_name,
         } => {
-            let hashtab = start_hashmap_build(qml_root_path);
+            let mut hashtab = start_hashmap_build(qml_root_path);
+            if let Some(hashrules) = hashrules_name {
+                println!(
+                    "Started processing hashtab rules from file {}...",
+                    hashrules
+                );
+                let rules =
+                    HashRules::compile(&std::fs::read_to_string(hashrules).unwrap()).unwrap();
+                rules.process(&mut hashtab);
+            }
             let hashtab_data = serialize_hashtab(&hashtab);
             std::fs::write(hashtab_name, hashtab_data).unwrap()
         }

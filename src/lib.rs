@@ -1,4 +1,5 @@
 #![allow(dead_code)]
+use hashrules::HashRules;
 use hashtab::{merge_hash_file, serialize_hashtab, HashTab};
 use lazy_static::lazy_static;
 use lib_util::{
@@ -11,6 +12,7 @@ use parser::qml::lexer::QMLDiffExtensions;
 use processor::find_and_process;
 use refcell_translation::{translate_from_root, untranslate_from_root};
 use slots::Slots;
+use std::ops::Deref;
 use std::time::Duration;
 use std::{
     ffi::{c_char, CStr, CString},
@@ -19,6 +21,7 @@ use std::{
 use util::common_util::{load_diff_file, parse_diff};
 
 mod hash;
+mod hashrules;
 mod hashtab;
 mod parser;
 mod processor;
@@ -34,6 +37,21 @@ lazy_static! {
     static ref SLOTS: Mutex<Slots> = Mutex::new(Slots::new());
     static ref CHANGES: Mutex<Vec<Change>> = Mutex::new(Vec::new());
     static ref POST_INIT: Mutex<bool> = Mutex::new(false);
+    static ref HASHTAB_RULES: Mutex<Option<HashRules>> = Mutex::new(None);
+}
+
+#[no_mangle]
+extern "C" fn qmldiff_load_rules(rules: *const c_char) {
+    let rules: String = unsafe { CStr::from_ptr(rules) }.to_str().unwrap().into();
+    match HashRules::compile(&rules) {
+        Ok(rules_ok) => {
+            *HASHTAB_RULES.lock().unwrap() = Some(rules_ok);
+            eprintln!("[qmldiff]: Configured hashtab rules.");
+        }
+        Err(error) => {
+            eprintln!("[qmldiff]: Error loading rules: {}", error);
+        }
+    }
 }
 
 #[no_mangle]
@@ -143,11 +161,7 @@ extern "C" fn qmldiff_build_change_files(root_dir: *const c_char) -> i32 {
 pub unsafe extern "C" fn qmldiff_is_modified(file_name: *const c_char) -> bool {
     let file_name: String = CStr::from_ptr(file_name).to_str().unwrap().into();
 
-    if is_building_hashtab() {
-        return file_name.to_lowercase().ends_with(".qml");
-    }
-
-    if is_extracting_tree() {
+    if is_extracting_tree() || is_building_hashtab() {
         return true;
     }
 
@@ -241,7 +255,14 @@ pub extern "C" fn qmldiff_start_saving_thread() {
                             continue;
                         }
                     };
-                    let string = serialize_hashtab(&hashtab);
+                    let mut to_process_rules = hashtab.clone();
+                    if let Some(rules) = HASHTAB_RULES.lock().unwrap().deref() {
+                        eprintln!("[qmldiff]: Processing rules.");
+                        rules.process(&mut to_process_rules);
+                    } else {
+                        eprintln!("[qmldiff]: No rules to process.");
+                    }
+                    let string = serialize_hashtab(&to_process_rules);
                     if let Err(e) = std::fs::write(&dist_hashmap_path, string) {
                         eprintln!(
                             "[qmldiff]: Cannot write to {}: {}",
