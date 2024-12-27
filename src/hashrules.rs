@@ -5,17 +5,17 @@ use crate::{hash::hash, hashtab::HashTab};
 
 #[derive(Debug)]
 enum MatchConditionEqualityCheck {
-    HashEquals(u64),
-    StringEquals(String),
-    AnyEquals,
+    Hash(u64),
+    String(String),
+    Any,
 }
 
 impl MatchConditionEqualityCheck {
     fn matches(&self, value: &str) -> bool {
         match self {
-            Self::AnyEquals => true,
-            Self::HashEquals(h) => hash(value) == *h,
-            Self::StringEquals(v) => value == v,
+            Self::Any => true,
+            Self::Hash(h) => hash(value) == *h,
+            Self::String(v) => value == v,
         }
     }
 }
@@ -43,9 +43,9 @@ impl MatchCondition {
                     let opcode_char = l.chars().nth(0).unwrap();
                     let rest = l[1..].to_string();
                     let result = match opcode_char {
-                        '-' => MatchConditionEqualityCheck::AnyEquals,
-                        'H' => MatchConditionEqualityCheck::HashEquals(rest.parse::<u64>()?),
-                        'E' => MatchConditionEqualityCheck::StringEquals(rest),
+                        '-' => MatchConditionEqualityCheck::Any,
+                        'H' => MatchConditionEqualityCheck::Hash(rest.parse::<u64>()?),
+                        'E' => MatchConditionEqualityCheck::String(rest),
                         e => {
                             return Err(Error::msg(format!(
                                 "Cannot parse opcode char for match condition: {}",
@@ -101,7 +101,7 @@ impl HashRules {
                 }
             };
             let mut values = vec![];
-            while let Some(out_line) = lines.next() {
+            for out_line in lines.by_ref() {
                 if out_line == "#" {
                     break;
                 } else {
@@ -165,7 +165,7 @@ impl HashRules {
                             // Emit.
                             for value_to_emit in &rule.values {
                                 let value_final = Regex::new("\\$([\\d]*)").unwrap().replace_all(
-                                    &value_to_emit,
+                                    value_to_emit,
                                     |h: &Captures| {
                                         let capture_index = h[1].parse::<usize>();
                                         if let Ok(capture_index) = capture_index {
@@ -178,7 +178,7 @@ impl HashRules {
                                                 );
                                             }
                                         } else {
-                                            eprintln!("Not a valid hash {}!", h[1].to_string());
+                                            eprintln!("Not a valid hash {}!", &h[1]);
                                         }
 
                                         "INVALID!"

@@ -214,7 +214,7 @@ pub fn emit_object(object: &Object, indent: usize) -> Vec<Line> {
                 lines.extend(emit_object(object, indent));
             }
             ObjectChild::Property(prop) => {
-                let mut line = emit_property_prologue(&prop);
+                let mut line = emit_property_prologue(prop);
                 if let Some(default) = &prop.default_value {
                     let new_lines = emit_assignment_child_value(default, indent);
                     line += ": ";
@@ -226,7 +226,7 @@ pub fn emit_object(object: &Object, indent: usize) -> Vec<Line> {
                 }
             }
             ObjectChild::ObjectProperty(prop) => {
-                let mut line = emit_property_prologue(&prop);
+                let mut line = emit_property_prologue(prop);
                 let new_lines = emit_object(&prop.default_value, indent);
                 line += ": ";
                 line += &new_lines[0].text;

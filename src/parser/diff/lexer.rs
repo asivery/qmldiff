@@ -164,7 +164,7 @@ impl<'a> Lexer<'a> {
     }
 }
 
-impl<'a> Lexer<'a> {
+impl Lexer<'_> {
     pub fn next_token(&mut self) -> Result<TokenType, Error> {
         if let Some(c) = self.peek() {
             match c {
@@ -287,7 +287,7 @@ impl<'a> Lexer<'a> {
     }
 }
 
-impl<'a> Iterator for Lexer<'a> {
+impl Iterator for Lexer<'_> {
     type Item = TokenType;
 
     fn next(&mut self) -> Option<Self::Item> {

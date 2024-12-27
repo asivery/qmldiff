@@ -25,9 +25,7 @@ pub unsafe fn include_if_building_hashtab(file_name: &str, raw_contents: *const 
         for entry in file_name.split('/') {
             if !entry.is_empty() {
                 let hashed = hash(entry);
-                if !hashtab.contains_key(&hashed) {
-                    hashtab.insert(hashed, entry.to_string());
-                }
+                hashtab.entry(hashed).or_insert_with(|| entry.to_string());
             }
         }
         hashtab.insert(hash(file_name), String::from(file_name));

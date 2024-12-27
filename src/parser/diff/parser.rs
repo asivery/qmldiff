@@ -141,7 +141,7 @@ pub struct Change {
     pub changes: Vec<FileChangeAction>,
 }
 
-impl<'a> Parser<'a> {
+impl Parser<'_> {
     fn next_lex(&mut self) -> Result<TokenType> {
         self.discard_whitespace();
 

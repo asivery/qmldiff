@@ -117,7 +117,7 @@ fn process_single_diff(
                         // goes against the spec, it's not an issue
                         TokenType::Identifier(format!(
                             "[[{}{}]]",
-                            string.chars().nth(0).unwrap(),
+                            string.chars().next().unwrap(),
                             inv_hashtab.get(&string[1..string.len() - 1]).unwrap()
                         ))
                     } else {
@@ -150,7 +150,7 @@ fn process_single_diff(
                                 // See comment above
                                 qml::lexer::TokenType::Identifier(format!(
                                     "~&{}{}&~",
-                                    string.chars().nth(0).unwrap(),
+                                    string.chars().next().unwrap(),
                                     inv_hashtab.get(&string[1..string.len() - 1]).unwrap()
                                 ))
                             } else {

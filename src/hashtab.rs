@@ -103,7 +103,7 @@ where
     loop {
         let mut hash_value = [0u8; 8];
         let mut str_len = [0u8; 4];
-        if let Err(_) = data_file.read_exact(&mut hash_value) {
+        if data_file.read_exact(&mut hash_value).is_err() {
             break;
         }
         data_file.read_exact(&mut str_len)?;
