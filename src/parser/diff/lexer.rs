@@ -243,9 +243,9 @@ impl Lexer<'_> {
                     }
                 }
 
-                c if c.is_alphabetic() || c.is_ascii_digit() || c == '_' || c == '/' /*|| c == '.' */ => {
+                c if c.is_alphabetic() || c.is_ascii_digit() || c == '_' || c == '-' || c == '/' /*|| c == '.' */ => {
                     let ident =
-                        self.collect_while(|_, c| (c.is_alphanumeric() || c == '_' || c == '.' || c == '/').into());
+                        self.collect_while(|_, c| (c.is_alphanumeric() || c == '-' || c == '_' || c == '.' || c == '/').into());
                     if let Ok(keyword) = Keyword::try_from(ident.as_str()) {
                         Ok(TokenType::Keyword(keyword))
                     } else {
