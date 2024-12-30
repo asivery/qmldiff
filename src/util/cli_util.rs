@@ -74,12 +74,6 @@ pub fn process_diff_tree(
         let path = std::path::Path::new(&file);
         if path.is_file() {
             process_single_diff(file, hashtab, inv_hashtab, into_hash);
-        } else if path.is_dir() {
-            let mut next_tree = vec![];
-            for entry in std::fs::read_dir(path).unwrap() {
-                next_tree.push(String::from(entry.unwrap().path().to_string_lossy()));
-            }
-            process_diff_tree(&next_tree, hashtab, inv_hashtab, into_hash);
         }
     }
 }
