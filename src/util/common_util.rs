@@ -4,7 +4,10 @@ use anyhow::Result;
 
 use crate::{
     hashtab::HashTab,
-    parser::diff::{self, parser::Change},
+    parser::{
+        diff::{self, parser::Change},
+        qml::{self, lexer::QMLDiffExtensions, parser::TreeElement},
+    },
 };
 
 pub fn load_diff_file<P>(
@@ -29,4 +32,15 @@ pub fn parse_diff(
     let mut parser = diff::parser::Parser::new(Box::new(tokens.into_iter()), root_dir, hashtab);
 
     parser.parse()
+}
+
+pub fn parse_qml(
+    raw_qml: String,
+    extensions: Option<QMLDiffExtensions>,
+    slots_used: Option<&mut Vec<String>>,
+) -> Result<Vec<TreeElement>> {
+    let token_stream = qml::lexer::Lexer::new(raw_qml, extensions, slots_used);
+    let tokens: Vec<qml::lexer::TokenType> = token_stream.collect();
+    let mut parser = qml::parser::Parser::new(Box::new(tokens.into_iter()));
+    Ok(parser.parse()?)
 }

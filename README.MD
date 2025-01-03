@@ -59,6 +59,10 @@ TRAVERSE Rectangle > Item[.color="\"red\""]
 `TRAVERSE` blocks can included in one another, to modify objects deeper in the tree structure of
 the current root. Because of that, every traverse block needs to be terminated with `END TRAVERSE`
 
+#### `LOAD <file_path>`
+
+The load statements loads the file with the path given as a QMLDiff file.
+
 #### `ASSERT <tree>`
 
 The ASSERT statement disambiguates a TRAVERSE statement by selecting only such roots, that
@@ -328,6 +332,121 @@ In the case of the aforementioned example, the hashtab consists of the following
 7082699062074 = "global"
 ```
 
+### Templates
+
+QMLDiff supports diff templating. Templates can be defined, then used in multiple places. They act like macros. Templates are completely separate from slots, and slots cannot be used with them in any way.
+
+#### Defining a template
+
+To define a template, use a `TEMPLATE` directive:
+
+```
+TEMPLATE SomeTemplate {
+    ObjectToBeTemplated {
+        someValue: "constant"
+        alwaysTrue: true
+        name: ~{name}~
+
+        ChildObject {
+            childValue: ~{child}~
+        }
+    }
+}
+```
+
+Templates work by defining an internal slot scope. That means that anything that would be a slot in normal diff code, would become a property in the template.
+
+#### Inserting a template
+
+Inserting a template can be done using an `INSERT TEMPLATE` directive:
+
+```
+INSERT TEMPLATE SomeTemplate {
+    child: 'SomeChildValue'
+    name: 'Some test object that uses templates'
+}
+```
+
+#### More complex examples
+
+Templates can also pass whole objects, or objects from slots 
+
+This file:
+
+```
+Object {
+	someValue: 10
+	Something {
+		a: 10
+	}
+	Something {
+		b: 10
+	}
+}
+```
+
+Can get translated into this file:
+
+```
+Object {
+    someValue: 10
+    Something {
+        a: 10
+        test: 100000
+        ObjectToBeTemplated {
+            someValue: "constant"
+            alwaysTrue: true
+            name: "Test Object"
+            ChildObject {
+                ObjectChildA {
+                    childa: true
+                }
+
+                ObjectChildB {
+                    childb: true
+                }
+            }
+        }
+    }
+
+    Something {
+        b: 10
+    }
+}
+```
+
+Using this template:
+
+```
+TEMPLATE SomeTemplate {
+    ObjectToBeTemplated {
+        someValue: "constant"
+        alwaysTrue: true
+        name: ~{name}~
+
+        ChildObject {
+            ~{children}~
+        }
+    }
+}
+
+AFFECT /main.qml
+    TRAVERSE Object > Something[.a=10] 
+        LOCATE AFTER ALL INSERT {
+            test: 100000
+        }
+        INSERT TEMPLATE SomeTemplate {
+            name: "Test Object"
+            children: ObjectChildA {
+                childa: true
+            }
+            children: ObjectChildB {
+                childb: true
+            }
+        }
+    END TRAVERSE
+END AFFECT
+```
 
 ## Using QMLDiff as a command-line tool:
 
@@ -370,5 +489,4 @@ QMLDiff can be used as a C library. It exports the following functions:
 - [ ] Better error handling - currently both syntax and processing errors are ambiguous
 - [ ] Better documentation
 - [ ] Better emitters - the current ones make the output QML a bit unreadable
-- [ ] New hashtab storage method (TOML is an overkill)
 - [ ] Better method of exporting hashtab when running as a library

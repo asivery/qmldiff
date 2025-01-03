@@ -122,16 +122,28 @@ pub enum TokenType {
 }
 
 #[derive(Clone)]
+pub enum ExtensionErrorHandling {
+    Error,
+    ConvertToID,
+}
+
+#[derive(Clone)]
 pub struct QMLDiffExtensions<'a> {
     hashtab: Option<&'a HashTab>,
     slots: Option<&'a Slots>,
+    error_handling: ExtensionErrorHandling,
 }
 
 impl<'a> QMLDiffExtensions<'a> {
-    pub fn new(hashtab: Option<&'a HashTab>, slot_resolver: Option<&'a Slots>) -> Self {
+    pub fn new(
+        hashtab: Option<&'a HashTab>,
+        slot_resolver: Option<&'a Slots>,
+        error_handling: ExtensionErrorHandling,
+    ) -> Self {
         Self {
             hashtab,
             slots: slot_resolver,
+            error_handling,
         }
     }
 }
@@ -205,10 +217,7 @@ impl Lexer<'_> {
                 // For hashed string: ~&[q]hash&~
                 // where [q] is one of `, ', "
                 // Example: ~&'1234&~
-                '~' if self.peek_offset(1) == Some('&')
-                    && self.extensions.is_some()
-                    && self.extensions.as_ref().unwrap().hashtab.is_some() =>
-                {
+                '~' if self.peek_offset(1) == Some('&') && self.extensions.is_some() => {
                     // HASH!
                     self.advance();
                     self.advance();
@@ -223,29 +232,44 @@ impl Lexer<'_> {
                     self.advance(); // Remove &
                     self.advance(); // Remove ~
                     let hash = hash_str.parse::<u64>()?;
-                    if let Some(resolved) = self
-                        .extensions
-                        .as_ref()
-                        .unwrap()
-                        .hashtab
-                        .unwrap()
-                        .get(&hash)
-                    {
-                        if let Some(quote) = string_quote {
-                            Ok(TokenType::String(format!(
-                                "{}{}{}",
-                                quote,
-                                resolved.clone(),
-                                quote
-                            )))
-                        } else {
-                            Ok(TokenType::Identifier(resolved.clone()))
+
+                    if self.extensions.as_ref().unwrap().hashtab.is_some() {
+                        if let Some(resolved) = self
+                            .extensions
+                            .as_ref()
+                            .unwrap()
+                            .hashtab
+                            .unwrap()
+                            .get(&hash)
+                        {
+                            return if let Some(quote) = string_quote {
+                                Ok(TokenType::String(format!(
+                                    "{}{}{}",
+                                    quote,
+                                    resolved.clone(),
+                                    quote
+                                )))
+                            } else {
+                                Ok(TokenType::Identifier(resolved.clone()))
+                            };
                         }
-                    } else {
-                        Err(Error::msg(format!(
-                            "Cannot dereference hash {} - not found in hashtab",
-                            hash
-                        )))
+                    }
+                    match self.extensions.as_ref().unwrap().error_handling {
+                        ExtensionErrorHandling::ConvertToID => {
+                            Ok(TokenType::Identifier(
+                                if let Some(string_quote) = string_quote {
+                                    format!("~{{{}{}}}~", string_quote, hash)
+                                } else {
+                                    format!("~{{{}}}~", hash)
+                                }
+                            ))
+                        },
+                        ExtensionErrorHandling::Error => {
+                            Err(Error::msg(format!(
+                                "Cannot dereference hash {} - hashtab support disabled or not found in tab",
+                                hash
+                            )))
+                        }
                     }
                 }
                 '~' if self.peek_offset(1) == Some('{')

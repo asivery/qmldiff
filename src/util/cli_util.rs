@@ -20,7 +20,7 @@ use crate::{
     processor::process,
     refcell_translation::{translate_from_root, untranslate_from_root},
     slots::Slots,
-    util::common_util::load_diff_file,
+    util::common_util::{load_diff_file, parse_qml},
 };
 
 fn build_recursive_hashmap(directory: &String, dir_relative_name: &String, tab: &mut HashTab) {
@@ -37,14 +37,8 @@ fn build_recursive_hashmap(directory: &String, dir_relative_name: &String, tab: 
         if t.is_file() {
             if name.ends_with(".qml") {
                 println!("Hashing {}", file.path().to_str().unwrap());
-                let lexer = qml::lexer::Lexer::new(
-                    std::fs::read_to_string(file.path()).unwrap(),
-                    None,
-                    None,
-                );
-                let tokens: Vec<qml::lexer::TokenType> = lexer.collect();
-                let mut parser = qml::parser::Parser::new(Box::new(tokens.into_iter()));
-                let tree = parser.parse().unwrap();
+                let tree =
+                    parse_qml(std::fs::read_to_string(file.path()).unwrap(), None, None).unwrap();
                 update_hashtab_from_tree(&tree, tab);
             }
         } else {
@@ -129,7 +123,11 @@ fn process_single_diff(
                     // Parse into tokens
                     let tokens = qml::lexer::Lexer::new(
                         qml,
-                        Some(QMLDiffExtensions::new(Some(hashtab), None)),
+                        Some(QMLDiffExtensions::new(
+                            Some(hashtab),
+                            None,
+                            qml::lexer::ExtensionErrorHandling::Error,
+                        )),
                         None,
                     )
                     .map(|token| match token {
@@ -181,7 +179,11 @@ fn process_single_diff(
                     TokenType::QMLCode(qml) => {
                         let tokens: Vec<qml::lexer::TokenType> = qml::lexer::Lexer::new(
                             qml,
-                            Some(QMLDiffExtensions::new(Some(hashtab), None)),
+                            Some(QMLDiffExtensions::new(
+                                Some(hashtab),
+                                None,
+                                qml::lexer::ExtensionErrorHandling::Error,
+                            )),
                             None,
                         )
                         .collect();
@@ -279,7 +281,11 @@ pub fn apply_changes(
             process(
                 &mut tree,
                 change,
-                QMLDiffExtensions::new(Some(hashtab), Some(slots)),
+                QMLDiffExtensions::new(
+                    Some(hashtab),
+                    Some(slots),
+                    qml::lexer::ExtensionErrorHandling::Error,
+                ),
                 &mut slots_used,
             )?
         }

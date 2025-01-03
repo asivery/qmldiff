@@ -12,11 +12,11 @@ use crate::refcell_translation::{
     translate_object_child, TranslatedEnumChild, TranslatedObject, TranslatedObjectAssignmentChild,
     TranslatedObjectChild, TranslatedObjectRef, TranslatedTree,
 };
+use crate::util::common_util::parse_qml;
 
 use anyhow::{Error, Result};
 
 use crate::parser::diff::parser::Change;
-use crate::parser::qml;
 
 pub fn find_and_process(
     file_name: &str,
@@ -219,10 +219,7 @@ fn insert_into_root(
         format!("Object {{ enum Enum {{ {} }} }} ", code)
     };
     // Start the QML parser...
-    let token_stream = qml::lexer::Lexer::new(raw_qml, Some(extended_features), Some(slots_used));
-    let tokens: Vec<qml::lexer::TokenType> = token_stream.collect();
-    let mut parser = qml::parser::Parser::new(Box::new(tokens.into_iter()));
-    let mut qml_root = parser.parse()?;
+    let mut qml_root = parse_qml(raw_qml, Some(extended_features), Some(slots_used))?;
     if let Some(TreeElement::Object(object)) = qml_root.pop() {
         match root {
             TreeRoot::Object(root) => {
@@ -356,6 +353,9 @@ pub fn process(
                     Insertable::Slot(_) => {
                         panic!("Cannot insert slot! Use `process_slots()` first!")
                     }
+                    Insertable::Template(_, _) => {
+                        panic!("Cannot insert template! Use `process_templates()` first!")
+                    }
                 } {
                     let (root, mut cursor) = unambiguous_root_cursor_set!();
                     insert_into_root(
@@ -406,6 +406,9 @@ pub fn process(
                         Insertable::Code(code) => code,
                         Insertable::Slot(_) => {
                             panic!("Cannot insert slot! Use `process_slots()` first!")
+                        }
+                        Insertable::Template(_, _) => {
+                            panic!("Cannot insert template! Use `process_slots()` first!")
                         }
                     },
                     extended_features.clone(),

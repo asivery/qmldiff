@@ -90,13 +90,14 @@ pub struct LocateAction {
 #[derive(Debug, Clone)]
 pub struct ReplaceAction {
     pub selector: NodeTree,
-    pub content: Insertable, // QML / SLOT
+    pub content: Insertable, // QML / SLOT / TEMPLATE
 }
 
 #[derive(Debug, Clone)]
 pub enum Insertable {
     Code(String),
     Slot(String),
+    Template(String, String),
 }
 
 #[derive(Debug, Clone)]
@@ -306,8 +307,23 @@ impl Parser<'_> {
                 Keyword::Insert => {
                     let next = self.next_lex()?;
                     match next {
-                        TokenType::Keyword(Keyword::Template)
-                        | TokenType::Keyword(Keyword::Slot) => {
+                        TokenType::Keyword(Keyword::Template) => {
+                            self.discard_whitespace();
+                            let template_name = self.next_id()?;
+                            self.discard_whitespace();
+                            let next_token = match self.next_lex() {
+                                Ok(TokenType::QMLCode(code)) => code,
+                                _ => {
+                                    return Err(Error::msg("Expected 'INSERT TEMPLATE <name> {}"));
+                                }
+                            };
+
+                            Ok(FileChangeAction::Insert(Insertable::Template(
+                                template_name,
+                                next_token,
+                            )))
+                        }
+                        TokenType::Keyword(Keyword::Slot) => {
                             Ok(FileChangeAction::Insert(Insertable::Slot(self.next_id()?)))
                         }
                         TokenType::QMLCode(code) => {
@@ -481,12 +497,20 @@ impl Parser<'_> {
                             Some(ObjectToChange::File(self.next_string_or_id()?));
                         in_slot = false;
                     }
-                    TokenType::Keyword(Keyword::Template) | TokenType::Keyword(Keyword::Slot) => {
+                    TokenType::Keyword(Keyword::Template) => {
+                        let name = self.next_id()?;
+                        let data = match self.next_lex() {
+                            Ok(TokenType::QMLCode(c)) => c,
+                            _ => panic!("Expected TEMPLATE <name> {{...}}"),
+                        };
+                        output.push(Change {
+                            destination: ObjectToChange::Template(name),
+                            changes: vec![FileChangeAction::Insert(Insertable::Code(data))],
+                        });
+                    }
+                    TokenType::Keyword(Keyword::Slot) => {
                         in_slot = true;
                         current_working_file = Some(match next {
-                            TokenType::Keyword(Keyword::Template) => {
-                                ObjectToChange::Template(self.next_id()?)
-                            }
                             TokenType::Keyword(Keyword::Slot) => {
                                 ObjectToChange::Slot(self.next_id()?)
                             }

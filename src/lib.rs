@@ -18,7 +18,7 @@ use std::{
     ffi::{c_char, CStr, CString},
     sync::Mutex,
 };
-use util::common_util::{load_diff_file, parse_diff};
+use util::common_util::{load_diff_file, parse_diff, parse_qml};
 
 mod hash;
 mod hashrules;
@@ -211,16 +211,18 @@ pub unsafe extern "C" fn qmldiff_process_file(
         // It is modified.
         // Build the tree.
         let contents: String = CStr::from_ptr(raw_contents).to_str().unwrap().into();
-        let lexer = crate::qml::lexer::Lexer::new(contents, None, None);
-        let tokens: Vec<crate::qml::lexer::TokenType> = lexer.collect();
-        let mut parser = crate::qml::parser::Parser::new(Box::new(tokens.into_iter()));
+        let tree = parse_qml(contents, None, None);
         eprintln!("[qmldiff]: Processing file {}...", &file_name);
-        match parser.parse() {
+        match tree {
             Ok(tree) => {
                 let mut tree = translate_from_root(tree);
                 let slots = &SLOTS.lock().unwrap();
                 let hashtab = &HASHTAB.lock().unwrap();
-                let extensions = QMLDiffExtensions::new(Some(hashtab), Some(slots));
+                let extensions = QMLDiffExtensions::new(
+                    Some(hashtab),
+                    Some(slots),
+                    qml::lexer::ExtensionErrorHandling::Error,
+                );
                 match find_and_process(&file_name, &mut tree, &changes, extensions, &mut Vec::new())
                 {
                     Ok(()) => {

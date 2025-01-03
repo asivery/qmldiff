@@ -4,7 +4,7 @@ use std::{
     path::Path,
 };
 
-use crate::{hash::hash, hashtab::update_hashtab_from_tree, HASHTAB};
+use crate::{hash::hash, hashtab::update_hashtab_from_tree, util::common_util::parse_qml, HASHTAB};
 
 pub fn is_building_hashtab() -> bool {
     std::env::var_os("QMLDIFF_HASHTAB_CREATE").is_some()
@@ -31,11 +31,8 @@ pub unsafe fn include_if_building_hashtab(file_name: &str, raw_contents: *const 
         hashtab.insert(hash(file_name), String::from(file_name));
         if file_name.to_lowercase().ends_with(".qml") {
             let contents: String = CStr::from_ptr(raw_contents).to_str().unwrap().into();
-            let lexer = crate::parser::qml::lexer::Lexer::new(contents, None, None);
-            let tokens: Vec<crate::parser::qml::lexer::TokenType> = lexer.collect();
-            let mut parser =
-                crate::parser::qml::parser::Parser::new(Box::new(Box::new(tokens.into_iter())));
-            if let Ok(tree) = parser.parse() {
+            let tree = parse_qml(contents, None, None);
+            if let Ok(tree) = tree {
                 update_hashtab_from_tree(&tree, &mut hashtab);
             } else {
                 eprintln!(
