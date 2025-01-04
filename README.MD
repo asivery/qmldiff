@@ -334,7 +334,7 @@ In the case of the aforementioned example, the hashtab consists of the following
 
 ### Templates
 
-QMLDiff supports diff templating. Templates can be defined, then used in multiple places. They act like macros. Templates are completely separate from slots, and slots cannot be used with them in any way.
+QMLDiff supports diff templating. Templates can be defined, then used in multiple places. They act like macros. Templates are completely separate from slots, and slots cannot be used with them in any way (of course templates can still be inserted into slots).
 
 #### Defining a template
 

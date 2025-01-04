@@ -164,7 +164,13 @@ fn main() {
             let not_read_slots: Vec<&String> = slots
                 .0
                 .iter()
-                .filter_map(|e| if !e.1.read_back { Some(e.0) } else { None })
+                .filter_map(|e| {
+                    if !e.1.read_back && !e.1.template {
+                        Some(e.0)
+                    } else {
+                        None
+                    }
+                })
                 .collect();
             if !not_read_slots.is_empty() {
                 println!(

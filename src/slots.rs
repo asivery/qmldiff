@@ -14,7 +14,7 @@ use crate::{
 };
 pub struct Slot {
     contents: Vec<FileChangeAction>,
-    template: bool,
+    pub template: bool,
     pub read_back: bool,
 }
 
@@ -48,16 +48,11 @@ impl Slots {
         })
     }
 
-    fn build_template_code(
-        &mut self,
-        template_name: &String,
-        invocation: &String,
-    ) -> Result<String> {
+    fn build_template_code(&self, template_name: &String, invocation: &String) -> Result<String> {
         // Merge the template's QML code with the invocation template
         // Then emit the code raw
         // Slots are not supported in templates
         let invocation_tree = {
-            let mut slots_to_update = Vec::new();
             let res = parse_qml(
                 format!("Object {{ {} }}", invocation),
                 Some(QMLDiffExtensions::new(
@@ -65,11 +60,8 @@ impl Slots {
                     None,
                     crate::parser::qml::lexer::ExtensionErrorHandling::ConvertToID,
                 )),
-                Some(&mut slots_to_update),
+                None,
             );
-            for entry in slots_to_update {
-                self.0.get_mut(&entry).unwrap().read_back = true;
-            }
             res
         }?;
         let invocation_tree = match invocation_tree.get(0).unwrap() {
@@ -81,16 +73,17 @@ impl Slots {
         macro_rules! insert_or_append {
             ($key: expr, $contents: expr) => {
                 if temp_slots.0.contains_key(&$key) {
-                    temp_slots.0.get_mut(&$key).unwrap().contents.push(FileChangeAction::Insert(Insertable::Code(
-                        $contents
-                    )));
+                    temp_slots
+                        .0
+                        .get_mut(&$key)
+                        .unwrap()
+                        .contents
+                        .push(FileChangeAction::Insert(Insertable::Code($contents)));
                 } else {
                     temp_slots.0.insert(
                         $key.clone(),
                         Slot {
-                            contents: vec![FileChangeAction::Insert(Insertable::Code(
-                                $contents
-                            ))],
+                            contents: vec![FileChangeAction::Insert(Insertable::Code($contents))],
                             template: false,
                             read_back: false,
                         },
@@ -233,6 +226,11 @@ impl Slots {
                         self.expand_slots(slot_contents.contents.clone(), into);
                     }
                 }
+                FileChangeAction::Insert(Insertable::Template(name, invocation)) => {
+                    into.push(FileChangeAction::Insert(Insertable::Code(
+                        self.build_template_code(&name, &invocation).unwrap(),
+                    )));
+                }
                 e => into.push(e),
             }
         }
@@ -265,15 +263,22 @@ impl Slots {
         slots_used.push(String::from(name));
 
         for content in &slot_contents.contents {
-            match content {
-                FileChangeAction::Insert(Insertable::Slot(slot_name)) => {
-                    self.flatten_slot(slot_name, into, slots_used)?
+            if let FileChangeAction::Insert(x) = content {
+                match x {
+                    Insertable::Slot(slot_name) => {
+                        self.flatten_slot(slot_name, into, slots_used)?
+                    }
+                    Insertable::Code(contents) => {
+                        into.push_str(contents);
+                        into.push('\n');
+                    }
+                    Insertable::Template(name, invocation) => {
+                        into.push_str(&self.build_template_code(name, invocation).unwrap());
+                        into.push('\n');
+                    }
                 }
-                FileChangeAction::Insert(Insertable::Code(contents)) => {
-                    into.push_str(contents);
-                    into.push('\n');
-                }
-                _ => panic!(),
+            } else {
+                panic!();
             };
         }
 
