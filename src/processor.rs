@@ -66,7 +66,7 @@ fn does_match(
                 PropRequirement::Contains(eq) => {
                     let child = object.children.get(index).unwrap();
                     if let Some(value) = child.get_str_value() {
-                        if value.contains(eq) {
+                        if !value.contains(eq) {
                             return false;
                         }
                     }
