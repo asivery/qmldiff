@@ -480,6 +480,9 @@ QMLDiff can be used as a C library. It exports the following functions:
 - `void qmldiff_start_saving_thread()`
     * Starts the hashtab-exporting thread *
     * Should be called as part of the initialization sequence of your program.
+- `void qmldiff_load_rules(const char *rules)`
+    * Sets the global hashtab-creation rules to the argument given
+    * `rules` are meant to be passed as a raw string containing the hashtab rules. Not a file path!
 
 \* - In order to create a hashtab when QMLDiff is utilized as a library, please set the `QMLDIFF_HASHTAB_CREATE` environment variable to the desired path where the hashtab file is to be kept. This will essentially disable all the diff-applying functionality of QMLDiff. It will be saving the current state of the global hashtab into the desired file every minute, until terminated.
 
