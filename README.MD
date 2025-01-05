@@ -7,13 +7,13 @@
 QMLDiff defines its own language for modifying QML trees. The language's syntax is partially inspired by BASIC, and the JS DOM's querySelector syntax.
 
 In the global scope, you are required to define which file
-is going to be alrered. To do that, use the `ALTER` keyword.
+is going to be alrered. To do that, use the `AFFECT` keyword.
 
 Example:
 ```
-ALTER /qml/TestQML.qml
+AFFECT /qml/TestQML.qml
     ; Diff statements go here.
-END ALTER
+END AFFECT
 ```
 
 Alternatively, you can add data to a `SLOT`. `SLOT`s' contents will be written to the final re-emitted QML in place of `INSERT SLOT <slot>`, or QML `~{slot}~` statements.
