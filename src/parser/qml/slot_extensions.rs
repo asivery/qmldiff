@@ -39,7 +39,7 @@ impl IteratorRemapper<TokenType> for QMLSlotRemapper<'_> {
                         ))
                     }
                 } else {
-                    ChainIteratorRemapper::Error(Error::msg(format!("No such slot {}", id)))
+                    ChainIteratorRemapper::Skip
                 }
             }
             other => ChainIteratorRemapper::Value(other),
