@@ -1,0 +1,28 @@
+Hashrules format:
+Overall file format:
+
+    Match_rule
+    Generation_rules
+    # ('#' character)
+    Match_rule
+    Generation_rules
+    #
+    ...
+
+Match_rule format:
+    For hashtab matching:
+        M<regex>
+        ; For every group defined in regex
+        ; H for "hash matching"
+        ; E for "equality matching"
+        ; - for "do not check"
+        H<hash>
+        ; or
+        E<value>
+    For "single generation":
+        A
+Generation_rules format:
+    Any string except the "#" character. Can reference hashes by enclosing them in [[hash]].
+    Can reference match groups from the Match_rule ($0 - whole match, $1 - first group, etc...)
+
+
