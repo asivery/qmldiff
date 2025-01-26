@@ -6,9 +6,7 @@ use lib_util::{
     extract_tree_node, include_if_building_hashtab, is_building_hashtab, is_extracting_tree,
 };
 use parser::diff::parser::{Change, ObjectToChange};
-use parser::qml;
 use parser::qml::emitter::emit_string;
-use parser::qml::lexer::QMLDiffExtensions;
 use processor::find_and_process;
 use refcell_translation::{translate_from_root, untranslate_from_root};
 use slots::Slots;
@@ -184,14 +182,14 @@ pub unsafe extern "C" fn qmldiff_process_file(
 ) -> *const c_char {
     let mut post_init = POST_INIT.lock().unwrap();
     if !*post_init {
+        eprintln!(
+            "[qmldiff]: Was asked to process the first slot. Sealing slots, entering postinit..."
+        );
         *post_init = true;
         SLOTS
             .lock()
             .unwrap()
             .process_slots(&mut CHANGES.lock().unwrap());
-        eprintln!(
-            "[qmldiff]: Was asked to process the first slot. Sealing slots, entering postinit..."
-        );
     }
     let file_name: String = CStr::from_ptr(file_name).to_str().unwrap().into();
 
@@ -216,15 +214,8 @@ pub unsafe extern "C" fn qmldiff_process_file(
         match tree {
             Ok(tree) => {
                 let mut tree = translate_from_root(tree);
-                let slots = &SLOTS.lock().unwrap();
-                let hashtab = &HASHTAB.lock().unwrap();
-                let extensions = QMLDiffExtensions::new(
-                    Some(hashtab),
-                    Some(slots),
-                    qml::lexer::ExtensionErrorHandling::Error,
-                );
-                match find_and_process(&file_name, &mut tree, &changes, extensions, &mut Vec::new())
-                {
+                let slots = &mut SLOTS.lock().unwrap();
+                match find_and_process(&file_name, &mut tree, &changes, slots) {
                     Ok(()) => {
                         let raw_tree = untranslate_from_root(tree);
                         let emitted_string = CString::new(emit_string(&raw_tree).as_str()).unwrap();

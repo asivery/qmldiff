@@ -95,9 +95,9 @@ pub struct ReplaceAction {
 
 #[derive(Debug, Clone)]
 pub enum Insertable {
-    Code(String),
+    Code(Vec<crate::parser::qml::lexer::TokenType>),
     Slot(String),
-    Template(String, String),
+    Template(String, Vec<crate::parser::qml::lexer::TokenType>),
 }
 
 #[derive(Debug, Clone)]
@@ -433,7 +433,7 @@ impl Parser<'_> {
             };
             let mut parser = Self::new(
                 Box::new(
-                    Lexer::new(file_contents, self.hashtab)
+                    Lexer::new(file_contents)
                         .collect::<Vec<TokenType>>()
                         .into_iter(),
                 ),

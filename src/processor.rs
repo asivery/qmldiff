@@ -1,18 +1,21 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use crate::parser::common::IteratorPipeline;
 use crate::parser::diff::lexer::Keyword;
 use crate::parser::diff::parser::{
     FileChangeAction, Insertable, Location, LocationSelector, ObjectToChange,
 };
 use crate::parser::diff::parser::{NodeSelector, NodeTree, PropRequirement};
-use crate::parser::qml::lexer::QMLDiffExtensions;
+use crate::parser::qml::lexer::TokenType;
 use crate::parser::qml::parser::{Import, ObjectChild, TreeElement};
+use crate::parser::qml::slot_extensions::QMLSlotRemapper;
 use crate::refcell_translation::{
     translate_object_child, TranslatedEnumChild, TranslatedObject, TranslatedObjectAssignmentChild,
     TranslatedObjectChild, TranslatedObjectRef, TranslatedTree,
 };
-use crate::util::common_util::parse_qml;
+use crate::slots::Slots;
+use crate::util::common_util::parse_qml_from_chain;
 
 use anyhow::{Error, Result};
 
@@ -22,13 +25,12 @@ pub fn find_and_process(
     file_name: &str,
     qml: &mut TranslatedTree,
     diffs: &Vec<Change>,
-    extended_features: QMLDiffExtensions,
-    slots_used: &mut Vec<String>,
+    slots: &mut Slots,
 ) -> Result<()> {
     for diff in diffs {
         match &diff.destination {
             ObjectToChange::File(f) if f == file_name => {
-                process(qml, diff, extended_features.clone(), slots_used)?;
+                process(qml, diff, slots)?;
             }
             _ => {}
         }
@@ -209,17 +211,40 @@ fn find_first_matching_child(root: &TreeRoot, tree: &Vec<NodeSelector>) -> Resul
 fn insert_into_root(
     root_cursor: &mut usize,
     root: &TreeRoot,
-    code: &String,
-    extended_features: QMLDiffExtensions,
-    slots_used: &mut Vec<String>,
+    code: &[TokenType],
+    slots: &mut Slots,
 ) -> Result<()> {
-    let raw_qml = if matches!(root, TreeRoot::Object(_)) {
-        format!("Object {{ {} }}", code)
-    } else {
-        format!("Object {{ enum Enum {{ {} }} }} ", code)
-    };
+    let mut raw_qml = IteratorPipeline::new(Box::new(
+        if matches!(root, TreeRoot::Object(_)) {
+            let mut new_data = vec![
+                TokenType::Identifier("Object".to_string()),
+                TokenType::Symbol('{'),
+            ];
+            new_data.extend_from_slice(code);
+            new_data.push(TokenType::Symbol('}'));
+
+            new_data
+        } else {
+            let mut new_data = vec![
+                TokenType::Identifier("Object".to_string()),
+                TokenType::Symbol('{'),
+                TokenType::Keyword(crate::parser::qml::lexer::Keyword::Enum),
+                TokenType::Identifier("Enum".to_string()),
+                TokenType::Symbol('{'),
+            ];
+            new_data.extend_from_slice(code);
+            new_data.push(TokenType::Symbol('}'));
+            new_data.push(TokenType::Symbol('}'));
+
+            new_data
+        }
+        .into_iter(),
+    ));
+    let mut slot_resolver = QMLSlotRemapper::new(slots);
+    raw_qml.add_remapper(&mut slot_resolver);
     // Start the QML parser...
-    let mut qml_root = parse_qml(raw_qml, Some(extended_features), Some(slots_used))?;
+    let tokens = raw_qml.collect();
+    let mut qml_root = parse_qml_from_chain(tokens)?;
     if let Some(TreeElement::Object(object)) = qml_root.pop() {
         match root {
             TreeRoot::Object(root) => {
@@ -249,12 +274,7 @@ fn insert_into_root(
     Ok(())
 }
 
-pub fn process(
-    absolute_root: &mut TranslatedTree,
-    diff: &Change,
-    extended_features: QMLDiffExtensions,
-    slots_used: &mut Vec<String>,
-) -> Result<()> {
+pub fn process(absolute_root: &mut TranslatedTree, diff: &Change, slots: &mut Slots) -> Result<()> {
     let mut root_stack: Vec<RootReference> = Vec::new();
     let mut current_root = RootReference {
         root: vec![TreeRoot::Object(absolute_root.root.clone())],
@@ -358,13 +378,7 @@ pub fn process(
                     }
                 } {
                     let (root, mut cursor) = unambiguous_root_cursor_set!();
-                    insert_into_root(
-                        &mut cursor,
-                        root,
-                        code,
-                        extended_features.clone(),
-                        slots_used,
-                    )?;
+                    insert_into_root(&mut cursor, root, code, slots)?;
                     current_root.cursor = Some(cursor);
                 }
             }
@@ -411,8 +425,7 @@ pub fn process(
                             panic!("Cannot insert template! Use `process_slots()` first!")
                         }
                     },
-                    extended_features.clone(),
-                    slots_used,
+                    slots,
                 )?;
                 current_root.cursor = Some(element_idx);
             }

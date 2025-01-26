@@ -12,10 +12,11 @@ use crate::{
         diff::{
             self,
             emitter::emit_token_stream,
+            hash_processor::diff_hash_remapper,
             lexer::TokenType,
             parser::{Change, ObjectToChange},
         },
-        qml::{self, emitter::emit_string, lexer::QMLDiffExtensions},
+        qml::{self, emitter::emit_string, hash_extension::qml_hash_remap},
     },
     processor::process,
     refcell_translation::{translate_from_root, untranslate_from_root},
@@ -85,8 +86,9 @@ fn process_single_diff(
         }
         Ok(e) => e,
     };
-    let mut token_stream: Vec<TokenType> =
-        diff::lexer::Lexer::new(string_contents, hashtab).collect();
+    let mut token_stream: Vec<TokenType> = diff::lexer::Lexer::new(string_contents)
+        .map(|e| diff_hash_remapper(hashtab, e).unwrap())
+        .collect();
     if into_hash {
         token_stream = token_stream
             .into_iter()
@@ -115,47 +117,40 @@ fn process_single_diff(
                 }
                 TokenType::QMLCode(qml) => {
                     // Parse into tokens
-                    let tokens = qml::lexer::Lexer::new(
-                        qml,
-                        Some(QMLDiffExtensions::new(
-                            Some(hashtab),
-                            None,
-                            qml::lexer::ExtensionErrorHandling::Error,
-                        )),
-                        None,
-                    )
-                    .map(|token| match token {
-                        qml::lexer::TokenType::Identifier(id) => {
-                            if inv_hashtab.contains_key(&id) {
-                                qml::lexer::TokenType::Identifier(format!(
-                                    "~&{}&~",
-                                    inv_hashtab.get(&id).unwrap()
-                                ))
-                            } else {
-                                qml::lexer::TokenType::Identifier(id)
+                    let tokens = qml
+                        .into_iter()
+                        .map(|token| match token {
+                            qml::lexer::TokenType::Identifier(id) => {
+                                if inv_hashtab.contains_key(&id) {
+                                    qml::lexer::TokenType::Extension(
+                                        qml::lexer::QMLExtensionToken::HashedIdentifier(
+                                            *inv_hashtab.get(&id).unwrap(),
+                                        ),
+                                    )
+                                } else {
+                                    qml::lexer::TokenType::Identifier(id)
+                                }
                             }
-                        }
-                        qml::lexer::TokenType::String(string) => {
-                            if string.len() > 2
-                                && inv_hashtab.contains_key(&string[1..string.len() - 1])
-                            {
-                                // See comment above
-                                qml::lexer::TokenType::Identifier(format!(
-                                    "~&{}{}&~",
-                                    string.chars().next().unwrap(),
-                                    inv_hashtab.get(&string[1..string.len() - 1]).unwrap()
-                                ))
-                            } else {
-                                // Do not translate
-                                qml::lexer::TokenType::String(string)
+                            qml::lexer::TokenType::String(string) => {
+                                if string.len() > 2
+                                    && inv_hashtab.contains_key(&string[1..string.len() - 1])
+                                {
+                                    // See comment above
+                                    qml::lexer::TokenType::Extension(
+                                        qml::lexer::QMLExtensionToken::HashedString(
+                                            string.chars().next().unwrap(),
+                                            *inv_hashtab.get(&string[1..string.len() - 1]).unwrap(),
+                                        ),
+                                    )
+                                } else {
+                                    // Do not translate
+                                    qml::lexer::TokenType::String(string)
+                                }
                             }
-                        }
-                        tok => tok,
-                    })
-                    .collect();
-                    TokenType::QMLCode(qml::emitter::flatten_lines(
-                        &qml::emitter::emit_token_stream(&tokens, 0),
-                    ))
+                            tok => tok,
+                        })
+                        .collect();
+                    TokenType::QMLCode(tokens)
                 }
                 e => e,
             })
@@ -170,19 +165,11 @@ fn process_single_diff(
                     whitespace_indent = space.len() / 4;
                 }
                 match e {
-                    TokenType::QMLCode(qml) => {
-                        let tokens: Vec<qml::lexer::TokenType> = qml::lexer::Lexer::new(
-                            qml,
-                            Some(QMLDiffExtensions::new(
-                                Some(hashtab),
-                                None,
-                                qml::lexer::ExtensionErrorHandling::Error,
-                            )),
-                            None,
-                        )
-                        .collect();
-                        TokenType::QMLCode(qml::emitter::emit_simple_token_stream(&tokens))
-                    }
+                    TokenType::QMLCode(qml) => TokenType::QMLCode(
+                        qml.into_iter()
+                            .map(|e| qml_hash_remap(hashtab, e).unwrap())
+                            .collect::<Vec<_>>(),
+                    ),
                     e => e,
                 }
             })
@@ -232,7 +219,6 @@ pub fn apply_changes(
     qml_root_path: &str,
     qml_destination_path: &str,
     flatten: bool,
-    hashtab: &HashTab,
     slots: &mut Slots,
     changes: &Vec<Change>,
 ) -> Result<()> {
@@ -266,25 +252,9 @@ pub fn apply_changes(
                 )))
             }
         };
-        let mut slots_used = Vec::new();
-        let mut tree = translate_from_root(
-            qml::parser::Parser::new(Box::new(qml::lexer::Lexer::new(file_contents, None, None)))
-                .parse()?,
-        );
+        let mut tree = translate_from_root(parse_qml(file_contents, None, None)?);
         for change in changes {
-            process(
-                &mut tree,
-                change,
-                QMLDiffExtensions::new(
-                    Some(hashtab),
-                    Some(slots),
-                    qml::lexer::ExtensionErrorHandling::Error,
-                ),
-                &mut slots_used,
-            )?
-        }
-        for slot_used in slots_used {
-            slots.0.get_mut(&slot_used).unwrap().read_back = true;
+            process(&mut tree, change, slots)?
         }
         // Rewrite the file in destination
         let destination_path = if flatten {

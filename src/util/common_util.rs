@@ -5,9 +5,17 @@ use anyhow::Result;
 use crate::{
     hashtab::HashTab,
     parser::{
-        diff::{self, parser::Change},
-        qml::{self, lexer::QMLDiffExtensions, parser::TreeElement},
+        common::IteratorPipeline,
+        diff::{self, hash_processor::diff_hash_remapper, parser::Change},
+        qml::{
+            self,
+            hash_extension::QMLHashRemapper,
+            lexer::{Lexer, TokenType},
+            parser::TreeElement,
+            slot_extensions::QMLSlotRemapper,
+        },
     },
+    slots::Slots,
 };
 
 pub fn load_diff_file<P>(
@@ -27,8 +35,10 @@ pub fn parse_diff(
     contents: String,
     hashtab: &HashTab,
 ) -> Result<Vec<Change>> {
-    let lexer = diff::lexer::Lexer::new(contents, hashtab);
-    let tokens: Vec<diff::lexer::TokenType> = lexer.collect();
+    let lexer = diff::lexer::Lexer::new(contents);
+    let tokens: Vec<diff::lexer::TokenType> = lexer
+        .map(|e| diff_hash_remapper(hashtab, e).unwrap())
+        .collect();
     let mut parser = diff::parser::Parser::new(Box::new(tokens.into_iter()), root_dir, hashtab);
 
     parser.parse()
@@ -36,11 +46,28 @@ pub fn parse_diff(
 
 pub fn parse_qml(
     raw_qml: String,
-    extensions: Option<QMLDiffExtensions>,
-    slots_used: Option<&mut Vec<String>>,
+    hashtab: Option<&HashTab>,
+    slots: Option<&mut Slots>,
 ) -> Result<Vec<TreeElement>> {
-    let token_stream = qml::lexer::Lexer::new(raw_qml, extensions, slots_used);
-    let tokens: Vec<qml::lexer::TokenType> = token_stream.collect();
+    let mut iterator = IteratorPipeline::new(Box::from(Lexer::new(raw_qml)));
+    let mut hash_mapper;
+    if hashtab.is_some() {
+        hash_mapper = QMLHashRemapper::new(hashtab.unwrap());
+        iterator.add_remapper(&mut hash_mapper);
+    }
+
+    let mut slot_mapper;
+    if let Some(slots) = slots {
+        slot_mapper = QMLSlotRemapper::new(slots);
+        iterator.add_remapper(&mut slot_mapper);
+    }
+
+    let mut parser: qml::parser::Parser =
+        qml::parser::Parser::new(Box::new(iterator.collect::<Vec<_>>().into_iter()));
+    parser.parse()
+}
+
+pub fn parse_qml_from_chain(tokens: Vec<TokenType>) -> Result<Vec<TreeElement>> {
     let mut parser = qml::parser::Parser::new(Box::new(tokens.into_iter()));
-    Ok(parser.parse()?)
+    parser.parse()
 }

@@ -2,8 +2,6 @@ use std::fmt::Display;
 
 use anyhow::Error;
 
-use crate::{hashtab::HashTab, slots::Slots};
-
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum Keyword {
     Import,
@@ -102,8 +100,26 @@ impl Display for TokenType {
             TokenType::NewLine(_) => String::from("\n"),
             TokenType::Comment(comment) => format!("/*{}*/", comment),
             TokenType::EndOfStream => String::from("<<End of Stream>>"),
+            TokenType::Extension(ext) => format!("{}", ext),
         })
     }
+}
+
+impl Display for QMLExtensionToken {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::HashedIdentifier(hash) => write!(f, "~&{}&~", hash),
+            Self::HashedString(quote, hash) => write!(f, "~&{}{}&~", quote, hash),
+            Self::Slot(slot) => write!(f, "~{{{}}}~", slot),
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub enum QMLExtensionToken {
+    HashedIdentifier(u64),
+    HashedString(char, u64),
+    Slot(String),
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -119,58 +135,24 @@ pub enum TokenType {
     Whitespace(String),
     EndOfStream,
     Unknown(char),
+    Extension(QMLExtensionToken),
 }
 
-#[derive(Clone)]
-pub enum ExtensionErrorHandling {
-    Error,
-    ConvertToID,
-}
-
-#[derive(Clone)]
-pub struct QMLDiffExtensions<'a> {
-    hashtab: Option<&'a HashTab>,
-    slots: Option<&'a Slots>,
-    error_handling: ExtensionErrorHandling,
-}
-
-impl<'a> QMLDiffExtensions<'a> {
-    pub fn new(
-        hashtab: Option<&'a HashTab>,
-        slot_resolver: Option<&'a Slots>,
-        error_handling: ExtensionErrorHandling,
-    ) -> Self {
-        Self {
-            hashtab,
-            slots: slot_resolver,
-            error_handling,
-        }
-    }
-}
-
-pub struct Lexer<'a> {
+pub struct Lexer {
     // HashTab is only required when reading the DIFF files.
     // Similarly to the DIFFs themselves, a hash can also repalce
     // any identifier within the QML tree.
-    extensions: Option<QMLDiffExtensions<'a>>,
-    input: String,                               // Raw input string
-    position: usize,                             // current position in the input
-    line_pos: usize,                             // Current position within a line [unused.]
-    pub slots_used: Option<&'a mut Vec<String>>, // Slots used by this token stream
+    input: String,   // Raw input string
+    position: usize, // current position in the input
+    line_pos: usize, // Current position within a line [unused.]
 }
 
-impl<'a> Lexer<'a> {
-    pub fn new(
-        input: String,
-        extended_features: Option<QMLDiffExtensions<'a>>,
-        slots_used: Option<&'a mut Vec<String>>,
-    ) -> Self {
+impl Lexer {
+    pub fn new(input: String) -> Self {
         Lexer {
             input,
             position: 0,
             line_pos: 0,
-            extensions: extended_features,
-            slots_used,
         }
     }
 
@@ -208,7 +190,7 @@ impl<'a> Lexer<'a> {
     }
 }
 
-impl Lexer<'_> {
+impl Lexer {
     pub fn next_token(&mut self) -> Result<TokenType, Error> {
         if let Some(c) = self.peek() {
             match c {
@@ -217,7 +199,7 @@ impl Lexer<'_> {
                 // For hashed string: ~&[q]hash&~
                 // where [q] is one of `, ', "
                 // Example: ~&'1234&~
-                '~' if self.peek_offset(1) == Some('&') && self.extensions.is_some() => {
+                '~' if self.peek_offset(1) == Some('&') => {
                     // HASH!
                     self.advance();
                     self.advance();
@@ -231,51 +213,14 @@ impl Lexer<'_> {
                         self.collect_while(|this, c| c != '&' && this.peek_offset(1) != Some('~'));
                     self.advance(); // Remove &
                     self.advance(); // Remove ~
-                    let hash = hash_str.parse::<u64>()?;
 
-                    if self.extensions.as_ref().unwrap().hashtab.is_some() {
-                        if let Some(resolved) = self
-                            .extensions
-                            .as_ref()
-                            .unwrap()
-                            .hashtab
-                            .unwrap()
-                            .get(&hash)
-                        {
-                            return if let Some(quote) = string_quote {
-                                Ok(TokenType::String(format!(
-                                    "{}{}{}",
-                                    quote,
-                                    resolved.clone(),
-                                    quote
-                                )))
-                            } else {
-                                Ok(TokenType::Identifier(resolved.clone()))
-                            };
-                        }
-                    }
-                    match self.extensions.as_ref().unwrap().error_handling {
-                        ExtensionErrorHandling::ConvertToID => {
-                            Ok(TokenType::Identifier(
-                                if let Some(string_quote) = string_quote {
-                                    format!("~{{{}{}}}~", string_quote, hash)
-                                } else {
-                                    format!("~{{{}}}~", hash)
-                                }
-                            ))
-                        },
-                        ExtensionErrorHandling::Error => {
-                            Err(Error::msg(format!(
-                                "Cannot dereference hash {} - hashtab support disabled or not found in tab",
-                                hash
-                            )))
-                        }
-                    }
+                    let hashed_value = hash_str.parse()?;
+                    Ok(TokenType::Extension(match string_quote {
+                        Some(q) => QMLExtensionToken::HashedString(q, hashed_value),
+                        None => QMLExtensionToken::HashedIdentifier(hashed_value),
+                    }))
                 }
-                '~' if self.peek_offset(1) == Some('{')
-                    && self.extensions.is_some()
-                    && self.extensions.as_ref().unwrap().slots.is_some() =>
-                {
+                '~' if self.peek_offset(1) == Some('{') => {
                     // Slot
                     self.advance();
                     self.advance();
@@ -283,19 +228,8 @@ impl Lexer<'_> {
                         self.collect_while(|this, c| c != '}' && this.peek_offset(1) != Some('~'));
                     self.advance(); // Remove }
                     self.advance(); // Remove ~
-                    let (resolved, slots_used_extra) = self
-                        .extensions
-                        .as_ref()
-                        .unwrap()
-                        .slots
-                        .unwrap()
-                        .resolve_slot_final_state(&slot_name)?;
-                    if let Some(slots) = &mut self.slots_used {
-                        slots.extend(slots_used_extra);
-                    }
-                    self.input.insert_str(self.position, &resolved);
 
-                    self.next_token()
+                    Ok(TokenType::Extension(QMLExtensionToken::Slot(slot_name)))
                 }
                 '\n' => {
                     self.advance();
@@ -380,7 +314,7 @@ impl Lexer<'_> {
     }
 }
 
-impl Iterator for Lexer<'_> {
+impl Iterator for Lexer {
     type Item = TokenType;
 
     fn next(&mut self) -> Option<Self::Item> {

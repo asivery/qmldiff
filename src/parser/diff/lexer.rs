@@ -2,7 +2,7 @@ use std::fmt::Display;
 
 use anyhow::Error;
 
-use crate::hashtab::HashTab;
+use crate::parser::qml;
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum Keyword {
@@ -84,6 +84,12 @@ impl TryFrom<&str> for Keyword {
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
+pub enum HashedValue {
+    HashedString(char, u64),
+    HashedIdentifier(u64),
+}
+
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum TokenType {
     Keyword(Keyword),
     Identifier(String),
@@ -93,12 +99,12 @@ pub enum TokenType {
     NewLine(usize),
     Whitespace(String),
     EndOfStream,
-    QMLCode(String),
+    QMLCode(Vec<qml::lexer::TokenType>),
     Unknown(char),
+    HashedValue(HashedValue),
 }
 
-pub struct Lexer<'a> {
-    hashtab: &'a HashTab,
+pub struct Lexer {
     input: String,
     position: usize, // current position in the input
     line_pos: usize,
@@ -120,13 +126,12 @@ impl From<bool> for CollectionType {
     }
 }
 
-impl<'a> Lexer<'a> {
-    pub fn new(input: String, hashtab: &'a HashTab) -> Self {
+impl Lexer {
+    pub fn new(input: String) -> Self {
         Lexer {
             input,
             position: 0,
             line_pos: 0,
-            hashtab,
         }
     }
 
@@ -164,7 +169,7 @@ impl<'a> Lexer<'a> {
     }
 }
 
-impl Lexer<'_> {
+impl Lexer {
     pub fn next_token(&mut self) -> Result<TokenType, Error> {
         if let Some(c) = self.peek() {
             match c {
@@ -230,17 +235,10 @@ impl Lexer<'_> {
                     }
                     self.advance();
                     let hash = hash.parse::<u64>().unwrap();
-                    let resolved_string = self.hashtab.get(&hash);
-                    match resolved_string {
-                        Some(string) => {
-                            if let Some(string_quote) = string_quote {
-                                Ok(TokenType::String(format!("{}{}{}", string_quote, string, string_quote)))
-                            } else {
-                                Ok(TokenType::Identifier(string.clone()))
-                            }
-                        },
-                        None => Err(Error::msg(format!("Cannot resolve hash {}", hash))),
-                    }
+                    Ok(TokenType::HashedValue(match string_quote {
+                        None => HashedValue::HashedIdentifier(hash),
+                        Some(q) => HashedValue::HashedString(q, hash)
+                    }))
                 }
 
                 c if c.is_alphabetic() || c.is_ascii_digit() || c == '_' || c == '-' || c == '/' /*|| c == '.' */ => {
@@ -266,7 +264,7 @@ impl Lexer<'_> {
                         (depth != 0).into()
                     });
                     self.advance(); // past the final } character
-                    Ok(TokenType::QMLCode(contents))
+                    Ok(TokenType::QMLCode(qml::lexer::Lexer::new(contents).collect()))
                 }
 
                 //       Child-of    Prop.EQ        ID      p.named | Others
@@ -287,7 +285,7 @@ impl Lexer<'_> {
     }
 }
 
-impl Iterator for Lexer<'_> {
+impl Iterator for Lexer {
     type Item = TokenType;
 
     fn next(&mut self) -> Option<Self::Item> {

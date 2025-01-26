@@ -1,4 +1,6 @@
-use super::lexer::TokenType;
+use crate::parser::qml::{self, emitter::flatten_lines};
+
+use super::lexer::{HashedValue, TokenType};
 
 pub fn token_stream_into_vec(
     mut stream: impl Iterator<Item = TokenType>,
@@ -21,11 +23,24 @@ pub fn emit_token_stream(stream: Vec<super::lexer::TokenType>) -> String {
             TokenType::Identifier(id) => id,
             TokenType::Keyword(kw) => kw.to_string(),
             TokenType::NewLine(_) => String::from("\n"),
-            TokenType::QMLCode(qml) => format!("{{{}}}", qml),
-            TokenType::String(str) => str,
+            TokenType::QMLCode(qml) => format!(
+                "{{{}}}",
+                flatten_lines(&qml::emitter::emit_token_stream(&qml, 0))
+            ),
+            TokenType::String(str) => {
+                if str.starts_with('\'') || str.starts_with('"') {
+                    str
+                } else {
+                    format!("`{}`", str)
+                }
+            }
             TokenType::Symbol(chr) => String::from(chr),
             TokenType::Unknown(chr) => String::from(chr),
             TokenType::Whitespace(ws) => ws,
+            TokenType::HashedValue(HashedValue::HashedString(q, hash)) => {
+                format!("[[{}{}]]", q, hash)
+            }
+            TokenType::HashedValue(HashedValue::HashedIdentifier(hash)) => format!("[[{}]]", hash),
         };
         output_string += &token_string;
     }

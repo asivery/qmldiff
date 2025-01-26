@@ -1,17 +1,22 @@
-use anyhow::{Error, Result};
+use anyhow::{bail, Error, Result};
 use std::{collections::HashMap, mem::take};
 
 use crate::{
     parser::{
+        common::IteratorPipeline,
         diff::parser::{Change, FileChangeAction, Insertable, ObjectToChange, ReplaceAction},
         qml::{
-            emitter::{emit_object, emit_simple_token_stream, flatten_lines},
-            lexer::QMLDiffExtensions,
+            self,
+            emitter::{emit_object, flatten_lines},
+            lexer::TokenType,
             parser::{AssignmentChildValue, ObjectChild, TreeElement},
+            slot_extensions::QMLSlotRemapper,
         },
     },
-    util::common_util::parse_qml,
+    util::common_util::parse_qml_from_chain,
 };
+
+#[derive(Debug)]
 pub struct Slot {
     contents: Vec<FileChangeAction>,
     pub template: bool,
@@ -48,23 +53,25 @@ impl Slots {
         })
     }
 
-    fn build_template_code(&self, template_name: &String, invocation: &String) -> Result<String> {
+    fn build_template_code(
+        &self,
+        template_name: &String,
+        invocation: &[TokenType],
+    ) -> Result<Vec<TokenType>> {
         // Merge the template's QML code with the invocation template
         // Then emit the code raw
         // Slots are not supported in templates
-        let invocation_tree = {
-            let res = parse_qml(
-                format!("Object {{ {} }}", invocation),
-                Some(QMLDiffExtensions::new(
-                    None,
-                    None,
-                    crate::parser::qml::lexer::ExtensionErrorHandling::ConvertToID,
-                )),
-                None,
-            );
-            res
-        }?;
-        let invocation_tree = match invocation_tree.get(0).unwrap() {
+        let invocation_tree = parse_qml_from_chain({
+            let mut temp = vec![
+                TokenType::Identifier("Object".to_string()),
+                TokenType::Symbol('{'),
+            ];
+            temp.extend_from_slice(invocation);
+            temp.push(TokenType::Symbol('}'));
+
+            temp
+        })?;
+        let invocation_tree = match invocation_tree.first().unwrap() {
             TreeElement::Object(root) => root,
             _ => panic!(),
         };
@@ -100,12 +107,14 @@ impl Slots {
                             panic!("Only simple assignments are supported")
                         }
                         AssignmentChildValue::Other(stream) => {
-                            emit_simple_token_stream(stream)
+                            stream.clone()
                         }
                     });
                 }
                 ObjectChild::ObjectAssignment(assignment) => {
-                    insert_or_append!(assignment.name, flatten_lines(&emit_object(&assignment.value, 0)));
+                    // TODO: Make it better.
+                    let stream = qml::lexer::Lexer::new(flatten_lines(&emit_object(&assignment.value, 0)));
+                    insert_or_append!(assignment.name, stream.collect::<Vec<_>>());
                 }
                 _ => return Err(Error::msg(
                     "Cannot process template invocation. Only simple / object assignments are supported.",
@@ -114,35 +123,34 @@ impl Slots {
         }
 
         let emited_template = {
-            let mut slots_to_update = Vec::new();
             let slot_ref = self.0.get(template_name).unwrap();
             if !slot_ref.template {
                 panic!("Cannot insert a slot as template!");
             }
-            let string_contents = match &slot_ref.contents[0] {
+            let template_contents = match &slot_ref.contents[0] {
                 FileChangeAction::Insert(Insertable::Code(c)) => c,
-                _ => panic!("Cannot happen."),
+                _ => unreachable!(),
             };
-            let res = parse_qml(
-                string_contents.clone(),
-                Some(QMLDiffExtensions::new(
-                    None,
-                    Some(&temp_slots),
-                    crate::parser::qml::lexer::ExtensionErrorHandling::ConvertToID,
-                )),
-                Some(&mut slots_to_update),
-            );
-            if slots_to_update.len() != temp_slots.0.len() {
-                panic!("Error inserting a template - not all values used!")
+            let res = {
+                let mut remapper = QMLSlotRemapper::new(&mut temp_slots);
+                let mut iterator =
+                    IteratorPipeline::new(Box::new(template_contents.clone().into_iter()));
+                iterator.add_remapper(&mut remapper);
+                iterator.collect::<Vec<_>>()
+            };
+            if !temp_slots.all_read_back() {
+                eprintln!("Values which haven't been read back:");
+                for e in temp_slots.0 {
+                    if !e.1.read_back {
+                        eprintln!("- {}", e.0);
+                    }
+                }
+                bail!("Error inserting a template - not all values used!");
             }
             res
-        }?;
-        let contents_qml_object = match emited_template.get(0).unwrap() {
-            TreeElement::Object(root) => root,
-            _ => panic!(),
         };
 
-        Ok(flatten_lines(&emit_object(contents_qml_object, 0)))
+        Ok(emited_template)
     }
 
     pub fn expand_templates(
@@ -208,11 +216,11 @@ impl Slots {
                     }
                     let qml_code_str = all_insertions
                         .into_iter()
-                        .map(|e| match e {
+                        .flat_map(|e| match e {
                             FileChangeAction::Insert(Insertable::Code(raw_code)) => raw_code,
                             _ => panic!(),
                         })
-                        .collect::<String>();
+                        .collect::<Vec<_>>();
                     into.push(FileChangeAction::Replace(ReplaceAction {
                         selector: r_action.selector,
                         content: Insertable::Code(qml_code_str),
@@ -250,31 +258,37 @@ impl Slots {
     }
 
     fn flatten_slot(
-        &self,
+        &mut self,
         name: &str,
-        into: &mut String,
-        slots_used: &mut Vec<String>,
+        into: &mut Vec<TokenType>,
     ) -> Result<()> {
-        let slot_contents = match self.0.get(name) {
-            None => return Err(Error::msg(format!("Cannot find slot {}", name))),
-            Some(e) => e,
+        if let Some(slot_mut) = self.0.get_mut(name) {
+            slot_mut.read_back = true;
+        } else {
+            return Err(Error::msg(format!("Cannot find slot {}", name)));
+        }
+        // UNSAFE: I've done it this way to make it so rust allows me to
+        // iterate over the slot contents recursively, while also letting
+        // me mark the slots as used.
+        // I know that during the recursive operation, slot_contents.contents
+        // will remain unaltered. The only thing I require `mut` for is setting
+        // `read_back`, so this will not collide with anything or cause any corruptions
+        // `slot_contents.contents` remains unchanged.
+        let slot_contents = unsafe {
+            &*(self.0.get(name).unwrap() as *const Slot)
         };
-
-        slots_used.push(String::from(name));
 
         for content in &slot_contents.contents {
             if let FileChangeAction::Insert(x) = content {
                 match x {
                     Insertable::Slot(slot_name) => {
-                        self.flatten_slot(slot_name, into, slots_used)?
+                        self.flatten_slot(slot_name, into)?
                     }
                     Insertable::Code(contents) => {
-                        into.push_str(contents);
-                        into.push('\n');
+                        into.extend_from_slice(contents);
                     }
                     Insertable::Template(name, invocation) => {
-                        into.push_str(&self.build_template_code(name, invocation).unwrap());
-                        into.push('\n');
+                        into.extend(self.build_template_code(name, invocation).unwrap());
                     }
                 }
             } else {
@@ -285,11 +299,10 @@ impl Slots {
         Ok(())
     }
 
-    pub fn resolve_slot_final_state(&self, name: &str) -> Result<(String, Vec<String>)> {
-        let mut string = String::new();
-        let mut slots_used = Vec::new();
-        self.flatten_slot(name, &mut string, &mut slots_used)?;
+    pub fn resolve_slot_final_state(&mut self, name: &str) -> Result<Vec<TokenType>> {
+        let mut output = Vec::new();
+        self.flatten_slot(name, &mut output)?;
 
-        Ok((string, slots_used))
+        Ok(output)
     }
 }

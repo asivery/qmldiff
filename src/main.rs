@@ -156,7 +156,6 @@ fn main() {
                 qml_root_path,
                 qml_destination_path,
                 *flatten,
-                &hashtab_value,
                 &mut slots,
                 &changes,
             )
