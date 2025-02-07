@@ -57,6 +57,10 @@ extern "C" fn qmldiff_add_external_diff(
     change_file_contents: *const c_char,
     file_identifier: *const c_char,
 ) -> bool {
+    if is_extracting_tree() || is_building_hashtab() {
+        return false;
+    }
+
     let file_identifier: String = unsafe { CStr::from_ptr(file_identifier) }
         .to_str()
         .unwrap()
