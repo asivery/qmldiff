@@ -111,6 +111,10 @@ fn load_hashtab(root_dir: &str) {
 
 #[no_mangle]
 extern "C" fn qmldiff_build_change_files(root_dir: *const c_char) -> i32 {
+    if is_extracting_tree() || is_building_hashtab() {
+        return 0;
+    }
+
     let root_dir: String = unsafe { CStr::from_ptr(root_dir) }.to_str().unwrap().into();
 
     if *POST_INIT.lock().unwrap() {
