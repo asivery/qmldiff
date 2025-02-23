@@ -3,7 +3,7 @@ use std::{collections::HashMap, mem::take};
 
 use crate::{
     parser::{
-        common::IteratorPipeline,
+        common::{IteratorPipeline, StringCharacterTokenizer},
         diff::parser::{Change, FileChangeAction, Insertable, ObjectToChange, ReplaceAction},
         qml::{
             self,
@@ -113,7 +113,7 @@ impl Slots {
                 }
                 ObjectChild::ObjectAssignment(assignment) => {
                     // TODO: Make it better.
-                    let stream = qml::lexer::Lexer::new(flatten_lines(&emit_object(&assignment.value, 0)));
+                    let stream = qml::lexer::Lexer::new(StringCharacterTokenizer::new(flatten_lines(&emit_object(&assignment.value, 0))));
                     insert_or_append!(assignment.name, stream.collect::<Vec<_>>());
                 }
                 _ => return Err(Error::msg(
@@ -257,11 +257,7 @@ impl Slots {
         !self.0.iter().any(|x| !x.1.read_back)
     }
 
-    fn flatten_slot(
-        &mut self,
-        name: &str,
-        into: &mut Vec<TokenType>,
-    ) -> Result<()> {
+    fn flatten_slot(&mut self, name: &str, into: &mut Vec<TokenType>) -> Result<()> {
         if let Some(slot_mut) = self.0.get_mut(name) {
             slot_mut.read_back = true;
         } else {
@@ -274,16 +270,12 @@ impl Slots {
         // will remain unaltered. The only thing I require `mut` for is setting
         // `read_back`, so this will not collide with anything or cause any corruptions
         // `slot_contents.contents` remains unchanged.
-        let slot_contents = unsafe {
-            &*(self.0.get(name).unwrap() as *const Slot)
-        };
+        let slot_contents = unsafe { &*(self.0.get(name).unwrap() as *const Slot) };
 
         for content in &slot_contents.contents {
             if let FileChangeAction::Insert(x) = content {
                 match x {
-                    Insertable::Slot(slot_name) => {
-                        self.flatten_slot(slot_name, into)?
-                    }
+                    Insertable::Slot(slot_name) => self.flatten_slot(slot_name, into)?,
                     Insertable::Code(contents) => {
                         into.extend_from_slice(contents);
                     }

@@ -102,3 +102,103 @@ impl<T> Iterator for IteratorPipeline<'_, T> {
         }
     }
 }
+
+pub enum CollectionType {
+    Break,
+    Include,
+    Drop,
+}
+
+impl From<bool> for CollectionType {
+    fn from(value: bool) -> Self {
+        if value {
+            CollectionType::Include
+        } else {
+            CollectionType::Break
+        }
+    }
+}
+
+pub trait GenericLexerBase {
+    fn peek(&self) -> Option<char>;
+    fn peek_offset(&self, off: usize) -> Option<char>;
+    fn advance(&mut self) -> Option<char>;
+
+    fn collect_while<F>(&mut self, mut condition: F) -> String
+    where
+        F: FnMut(char) -> CollectionType,
+        Self: Sized,
+    {
+        let mut result = String::new();
+        while let Some(c) = self.peek() {
+            match condition(c) {
+                CollectionType::Break => break,
+                CollectionType::Drop => {
+                    self.advance();
+                }
+                CollectionType::Include => {
+                    result.push(c);
+                    self.advance();
+                }
+            }
+        }
+        result
+    }
+}
+
+pub struct StringCharacterTokenizer {
+    pub input: String,   // Raw input string
+    pub position: usize, // current position in the input
+}
+
+impl Default for StringCharacterTokenizer {
+    fn default() -> Self {
+        Self {
+            input: String::default(),
+            position: 0,
+        }
+    }
+}
+
+impl StringCharacterTokenizer {
+    pub fn new(input: String) -> Self {
+        Self { input, position: 0 }
+    }
+
+    pub fn peek(&self) -> Option<char> {
+        self.input[self.position..].chars().next()
+    }
+
+    pub fn peek_offset(&self, off: usize) -> Option<char> {
+        self.input[self.position + off..].chars().next()
+    }
+
+    pub fn advance(&mut self) -> Option<char> {
+        if let Some(c) = self.peek() {
+            self.position += c.len_utf8();
+            Some(c)
+        } else {
+            None
+        }
+    }
+
+    pub fn collect_while<F>(&mut self, mut condition: F) -> String
+    where
+        F: FnMut(&Self, char) -> CollectionType,
+    {
+        let mut result = String::new();
+        while let Some(c) = self.peek() {
+            match condition(self, c) {
+                CollectionType::Break => break,
+                CollectionType::Drop => {
+                    self.advance();
+                }
+                CollectionType::Include => {
+                    result.push(c);
+                    self.advance();
+                }
+            }
+        }
+        result
+    }
+}

@@ -23,10 +23,17 @@ pub fn emit_token_stream(stream: Vec<super::lexer::TokenType>) -> String {
             TokenType::Identifier(id) => id,
             TokenType::Keyword(kw) => kw.to_string(),
             TokenType::NewLine(_) => String::from("\n"),
-            TokenType::QMLCode(qml) => format!(
-                "{{{}}}",
-                flatten_lines(&qml::emitter::emit_token_stream(&qml, 0))
-            ),
+            TokenType::QMLCode {
+                qml_code,
+                stream_character,
+            } => {
+                let emitted = flatten_lines(&qml::emitter::emit_token_stream(&qml_code, 0));
+                if let Some(token) = stream_character {
+                    format!("STREAM {} {} {}", &token, emitted, &token)
+                } else {
+                    format!("{{{}}}", emitted)
+                }
+            }
             TokenType::String(str) => {
                 if str.starts_with('\'') || str.starts_with('"') {
                     str

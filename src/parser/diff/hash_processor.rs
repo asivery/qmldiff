@@ -26,9 +26,13 @@ pub fn diff_hash_remapper(hashtab: &HashTab, value: TokenType) -> Result<TokenTy
                 hashtab.get(&id).unwrap().clone()
             }))
         }
-        TokenType::QMLCode(code) => {
-            Ok(TokenType::QMLCode(
-                code.into_iter()
+        TokenType::QMLCode {
+            qml_code,
+            stream_character: is_stream,
+        } => {
+            Ok(TokenType::QMLCode {
+                qml_code: qml_code
+                    .into_iter()
                     .map(|e| match qml_hash_remap(hashtab, e) {
                         Ok(v) => v,
                         Err(e) => {
@@ -36,7 +40,8 @@ pub fn diff_hash_remapper(hashtab: &HashTab, value: TokenType) -> Result<TokenTy
                         }
                     })
                     .collect(),
-            ))
+                stream_character: is_stream,
+            })
         }
         other => Ok(other),
     }

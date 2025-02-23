@@ -13,9 +13,7 @@ pub struct QMLSlotRemapper<'a> {
 
 impl<'a> QMLSlotRemapper<'a> {
     pub fn new(slots: &'a mut Slots) -> Self {
-        Self {
-            slots,
-        }
+        Self { slots }
     }
 }
 

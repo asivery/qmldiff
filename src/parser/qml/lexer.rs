@@ -2,6 +2,8 @@ use std::fmt::Display;
 
 use anyhow::Error;
 
+use crate::parser::common::{CollectionType, StringCharacterTokenizer};
+
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum Keyword {
     Import,
@@ -139,34 +141,25 @@ pub enum TokenType {
 }
 
 pub struct Lexer {
-    // HashTab is only required when reading the DIFF files.
-    // Similarly to the DIFFs themselves, a hash can also repalce
-    // any identifier within the QML tree.
-    input: String,   // Raw input string
-    position: usize, // current position in the input
+    pub stream: StringCharacterTokenizer,
     line_pos: usize, // Current position within a line [unused.]
 }
 
 impl Lexer {
-    pub fn new(input: String) -> Self {
-        Lexer {
-            input,
-            position: 0,
+    pub fn new(stream: StringCharacterTokenizer) -> Self {
+        Self {
+            stream,
             line_pos: 0,
         }
     }
 
     fn peek(&self) -> Option<char> {
-        self.input[self.position..].chars().next()
-    }
-
-    fn peek_offset(&self, off: usize) -> Option<char> {
-        self.input[self.position + off..].chars().next()
+        self.stream.input[self.stream.position..].chars().next()
     }
 
     fn advance(&mut self) -> Option<char> {
-        if let Some(c) = self.peek() {
-            self.position += c.len_utf8();
+        if let Some(c) = self.stream.peek() {
+            self.stream.position += c.len_utf8();
             Some(c)
         } else {
             None
@@ -178,10 +171,10 @@ impl Lexer {
         Z: FnMut(&Self, char) -> bool,
     {
         let mut result = String::new();
-        while let Some(c) = self.peek() {
+        while let Some(c) = self.stream.peek() {
             if condition(self, c) {
                 result.push(c);
-                self.advance();
+                self.stream.advance();
             } else {
                 break;
             }
@@ -192,27 +185,28 @@ impl Lexer {
 
 impl Lexer {
     pub fn next_token(&mut self) -> Result<TokenType, Error> {
-        if let Some(c) = self.peek() {
+        if let Some(c) = self.stream.peek() {
             match c {
                 // Cannot use [[hash]] - it's valid JS
                 // For hashes here, ~&hash&~ will be used.
                 // For hashed string: ~&[q]hash&~
                 // where [q] is one of `, ', "
                 // Example: ~&'1234&~
-                '~' if self.peek_offset(1) == Some('&') => {
+                '~' if self.stream.peek_offset(1) == Some('&') => {
                     // HASH!
-                    self.advance();
-                    self.advance();
+                    self.stream.advance();
+                    self.stream.advance();
                     // If string_quote is None, that means we're not dealing
                     // with a string, and should proceed normally.
-                    let string_quote: Option<char> = match self.peek() {
-                        Some('\'') | Some('"') | Some('`') => self.advance(),
+                    let string_quote: Option<char> = match self.stream.peek() {
+                        Some('\'') | Some('"') | Some('`') => self.stream.advance(),
                         _ => None,
                     };
-                    let hash_str =
-                        self.collect_while(|this, c| c != '&' && this.peek_offset(1) != Some('~'));
-                    self.advance(); // Remove &
-                    self.advance(); // Remove ~
+                    let hash_str = self.stream.collect_while(|this, c| {
+                        (c != '&' && this.peek_offset(1) != Some('~')).into()
+                    });
+                    self.stream.advance(); // Remove &
+                    self.stream.advance(); // Remove ~
 
                     let hashed_value = hash_str.parse()?;
                     Ok(TokenType::Extension(match string_quote {
@@ -220,75 +214,79 @@ impl Lexer {
                         None => QMLExtensionToken::HashedIdentifier(hashed_value),
                     }))
                 }
-                '~' if self.peek_offset(1) == Some('{') => {
+                '~' if self.stream.peek_offset(1) == Some('{') => {
                     // Slot
-                    self.advance();
-                    self.advance();
-                    let slot_name =
-                        self.collect_while(|this, c| c != '}' && this.peek_offset(1) != Some('~'));
-                    self.advance(); // Remove }
-                    self.advance(); // Remove ~
+                    self.stream.advance();
+                    self.stream.advance();
+                    let slot_name = self.stream.collect_while(|this, c| {
+                        (c != '}' && this.peek_offset(1) != Some('~')).into()
+                    });
+                    self.stream.advance(); // Remove }
+                    self.stream.advance(); // Remove ~
 
                     Ok(TokenType::Extension(QMLExtensionToken::Slot(slot_name)))
                 }
                 '\n' => {
-                    self.advance();
+                    self.stream.advance();
                     self.line_pos += 1;
                     Ok(TokenType::NewLine(self.line_pos))
                 }
 
                 c if c.is_whitespace() && c != '\n' => {
-                    let str = self.collect_while(|_, c| c.is_whitespace());
+                    let str = self.stream.collect_while(|_, c| c.is_whitespace().into());
                     Ok(TokenType::Whitespace(str))
                 }
 
-                '/' if self.input[self.position..].starts_with("//") => {
-                    self.advance();
-                    self.advance();
-                    let comment = self.collect_while(|_, c| c != '\n');
+                '/' if self.stream.input[self.stream.position..].starts_with("//") => {
+                    self.stream.advance();
+                    self.stream.advance();
+                    let comment = self.stream.collect_while(|_, c| (c != '\n').into());
                     Ok(TokenType::Comment(comment))
                 }
 
-                '/' if self.input[self.position..].starts_with("/*") => {
-                    self.advance();
-                    self.advance();
-                    let comment =
-                        self.collect_while(|s, _c| !s.input[s.position..].starts_with("*/"));
-                    self.advance(); // Consume '*'
-                    self.advance(); // Consume '/'
+                '/' if self.stream.input[self.stream.position..].starts_with("/*") => {
+                    self.stream.advance();
+                    self.stream.advance();
+                    let comment = self
+                        .stream
+                        .collect_while(|s, _c| (!s.input[s.position..].starts_with("*/")).into());
+                    self.stream.advance(); // Consume '*'
+                    self.stream.advance(); // Consume '/'
                     Ok(TokenType::Comment(comment))
                 }
 
                 '"' | '\'' | '`' => {
-                    let quote = self.advance().unwrap();
+                    let quote = self.stream.advance().unwrap();
                     let mut is_quoted = false;
-                    let string = self.collect_while(move |_, c| {
+                    let string = self.stream.collect_while(move |_, c| {
                         if is_quoted {
                             is_quoted = false;
-                            return true;
+                            return CollectionType::Include;
                         }
                         if c == quote {
-                            return false;
+                            return CollectionType::Break;
                         }
                         if c == '\\' {
                             is_quoted = true;
                         }
-                        true
+                        CollectionType::Include
                     });
 
-                    self.advance(); // Consume closing quote
+                    self.stream.advance(); // Consume closing quote
                     let s_quote = String::from(quote);
                     Ok(TokenType::String(s_quote.clone() + &string + &s_quote))
                 }
 
                 c if c.is_ascii_digit() => {
-                    let num_str = self.collect_while(|_, c| c.is_ascii_digit());
+                    let num_str = self.stream.collect_while(|_, c| c.is_ascii_digit().into());
                     let number = num_str.parse::<u64>().unwrap();
                     Ok(TokenType::Number(number))
                 }
 
                 c if c.is_alphabetic() || c == '_' => {
-                    let ident = self.collect_while(|_, c| c.is_alphanumeric() || c == '_');
+                    let ident = self
+                        .stream
+                        .collect_while(|_, c| (c.is_alphanumeric() || c == '_').into());
                     if let Ok(keyword) = Keyword::try_from(ident.as_str()) {
                         Ok(TokenType::Keyword(keyword))
                     } else if let Ok(symbolic) = SymbolicKeyword::try_from(ident.as_str()) {
@@ -299,12 +297,12 @@ impl Lexer {
                 }
 
                 '{' | '}' | ':' | ';' | '.' | ',' | '(' | ')' | '[' | ']' | '|' | '&' | '%' => {
-                    let symbol = self.advance().unwrap();
+                    let symbol = self.stream.advance().unwrap();
                     Ok(TokenType::Symbol(symbol))
                 }
 
                 _ => {
-                    let unknown = self.advance().unwrap();
+                    let unknown = self.stream.advance().unwrap();
                     Ok(TokenType::Unknown(unknown))
                 }
             }
@@ -319,7 +317,7 @@ impl Iterator for Lexer {
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
-            if self.position >= self.input.len() {
+            if self.stream.position >= self.stream.input.len() {
                 return None;
             }
             if let Ok(token) = self.next_token() {

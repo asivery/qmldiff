@@ -9,6 +9,7 @@ use crate::{
     hash::hash,
     hashtab::{update_hashtab_from_tree, HashTab, InvHashTab},
     parser::{
+        common::StringCharacterTokenizer,
         diff::{
             self,
             emitter::emit_token_stream,
@@ -86,9 +87,10 @@ fn process_single_diff(
         }
         Ok(e) => e,
     };
-    let mut token_stream: Vec<TokenType> = diff::lexer::Lexer::new(string_contents)
-        .map(|e| diff_hash_remapper(hashtab, e).unwrap())
-        .collect();
+    let mut token_stream: Vec<TokenType> =
+        diff::lexer::Lexer::new(StringCharacterTokenizer::new(string_contents))
+            .map(|e| diff_hash_remapper(hashtab, e).unwrap())
+            .collect();
     if into_hash {
         token_stream = token_stream
             .into_iter()
@@ -115,7 +117,10 @@ fn process_single_diff(
                         TokenType::String(string)
                     }
                 }
-                TokenType::QMLCode(qml) => {
+                TokenType::QMLCode {
+                    qml_code: qml,
+                    stream_character,
+                } => {
                     // Parse into tokens
                     let tokens = qml
                         .into_iter()
@@ -150,7 +155,10 @@ fn process_single_diff(
                             tok => tok,
                         })
                         .collect();
-                    TokenType::QMLCode(tokens)
+                    TokenType::QMLCode {
+                        qml_code: tokens,
+                        stream_character,
+                    }
                 }
                 e => e,
             })
@@ -165,11 +173,16 @@ fn process_single_diff(
                     whitespace_indent = space.len() / 4;
                 }
                 match e {
-                    TokenType::QMLCode(qml) => TokenType::QMLCode(
-                        qml.into_iter()
+                    TokenType::QMLCode {
+                        qml_code,
+                        stream_character,
+                    } => TokenType::QMLCode {
+                        qml_code: qml_code
+                            .into_iter()
                             .map(|e| qml_hash_remap(hashtab, e).unwrap())
                             .collect::<Vec<_>>(),
-                    ),
+                        stream_character,
+                    },
                     e => e,
                 }
             })

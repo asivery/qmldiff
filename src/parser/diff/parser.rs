@@ -1,14 +1,16 @@
 use std::{collections::HashMap, iter::Peekable, mem::take, path::Path};
 
-use crate::{error_received_expected, hashtab::HashTab};
+use crate::{
+    error_received_expected,
+    parser::{common::StringCharacterTokenizer, qml},
+};
 use anyhow::{Error, Result};
 
 use super::lexer::{Keyword, Lexer, TokenType};
 
-pub struct Parser<'a> {
+pub struct Parser {
     stream: Peekable<Box<dyn Iterator<Item = TokenType>>>,
     root_path: Option<String>,
-    hashtab: &'a HashTab,
 }
 
 #[derive(Debug, Clone)]
@@ -114,6 +116,12 @@ pub struct RenameAction {
 }
 
 #[derive(Debug, Clone)]
+pub struct RebuildAction {
+    pub selector: NodeSelector,
+    pub actions: Vec<RebuildInstruction>,
+}
+
+#[derive(Debug, Clone)]
 pub enum FileChangeAction {
     Traverse(NodeTree),
     Assert(NodeTree),
@@ -127,6 +135,7 @@ pub enum FileChangeAction {
     End(Keyword),
     AllowMultiple,
     AddImport(ImportAction),
+    Rebuild(RebuildAction),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -142,7 +151,67 @@ pub struct Change {
     pub changes: Vec<FileChangeAction>,
 }
 
-impl Parser<'_> {
+#[derive(Debug, Clone)]
+pub struct RebuildArgumentReference {
+    pub position: usize,
+    pub name: String,
+}
+
+#[derive(Debug, Clone)]
+pub enum LocateRebuildActionSelector {
+    All,
+    Stream(Vec<qml::lexer::TokenType>),
+}
+
+#[derive(Debug, Clone)]
+pub struct LocateRebuildAction {
+    pub location: Location,
+    pub selector: LocateRebuildActionSelector,
+}
+
+#[derive(Debug, Clone)]
+pub enum RemoveRebuildAction {
+    Located,
+    Stream(Vec<qml::lexer::TokenType>),
+    UntilStream(Vec<qml::lexer::TokenType>),
+    UntilEnd,
+}
+
+#[derive(Debug, Clone)]
+pub enum ReplaceRebuildActionWhat {
+    LiteralStream(Vec<qml::lexer::TokenType>),
+    Located,
+}
+
+#[derive(Debug, Clone)]
+pub struct ReplaceRebuildAction {
+    pub what: ReplaceRebuildActionWhat,
+    pub new_contents: Vec<qml::lexer::TokenType>,
+    pub until_stream: Option<Vec<qml::lexer::TokenType>>,
+}
+
+#[derive(Debug, Clone)]
+pub enum RebuildInstruction {
+    InsertArgument(RebuildArgumentReference),
+    RemoveArgument(RebuildArgumentReference),
+    RenameArgument(RebuildArgumentReference, String),
+
+    Locate(LocateRebuildAction),
+    Insert(Vec<qml::lexer::TokenType>),
+    Remove(RemoveRebuildAction),
+    Replace(ReplaceRebuildAction),
+}
+
+fn trim_token_stream(token_stream: &mut Vec<qml::lexer::TokenType>) {
+    while let Some(qml::lexer::TokenType::Whitespace(_)) = token_stream.first() {
+        token_stream.remove(0);
+    }
+    while let Some(qml::lexer::TokenType::Whitespace(_)) = token_stream.last() {
+        token_stream.pop();
+    }
+}
+
+impl Parser {
     fn next_lex(&mut self) -> Result<TokenType> {
         self.discard_whitespace();
 
@@ -269,10 +338,266 @@ impl Parser<'_> {
         Ok(nodes)
     }
 
+    fn read_argument_reference(&mut self) -> Result<RebuildArgumentReference> {
+        // <name> AT <pos>
+        let first_tok = self.next_lex()?;
+        let second_tok = self.next_lex()?;
+        let third_tok = self.next_lex()?;
+        match (first_tok, second_tok, third_tok) {
+            (
+                TokenType::Identifier(name),
+                TokenType::Keyword(Keyword::At),
+                TokenType::Identifier(pos),
+            ) => {
+                if let Ok(position) = pos.parse::<usize>() {
+                    Ok(RebuildArgumentReference { name, position })
+                } else {
+                    error_received_expected!(pos, "Argument position (number)")
+                }
+            }
+            _ => error_received_expected!("Invalid combination", "Argument reference"),
+        }
+    }
+
+    fn read_rebuild_instructions(&mut self) -> Result<Vec<RebuildInstruction>> {
+        let mut instructions = Vec::new();
+        loop {
+            let next = self.next_lex()?;
+            if let TokenType::Keyword(kw) = next {
+                match kw {
+                    Keyword::End => {
+                        let next = self.next_lex()?;
+                        match next {
+                            TokenType::Keyword(Keyword::Rebuild) => {
+                                return Ok(instructions);
+                            }
+                            _ => {
+                                return error_received_expected!(next, "END REBUILD");
+                            }
+                        }
+                    }
+
+                    Keyword::Affect
+                    | Keyword::Traverse
+                    | Keyword::Assert
+                    | Keyword::Template
+                    | Keyword::Import
+                    | Keyword::Multiple
+                    | Keyword::Slot
+                    | Keyword::Load
+                    | Keyword::With
+                    | Keyword::To
+                    | Keyword::All
+                    | Keyword::After
+                    | Keyword::Before
+                    | Keyword::Until
+                    | Keyword::Argument
+                    | Keyword::At
+                    | Keyword::Located
+                    | Keyword::Rebuild => {
+                        return error_received_expected!(kw, "Rebuild directive keyword");
+                    }
+
+                    Keyword::Insert => {
+                        let next_token = self.next_lex()?;
+                        match next_token {
+                            TokenType::QMLCode {
+                                qml_code: mut code,
+                                stream_character: _,
+                            } => {
+                                trim_token_stream(&mut code);
+                                instructions.push(RebuildInstruction::Insert(code));
+                            }
+                            TokenType::Keyword(Keyword::Argument) => {
+                                instructions.push(RebuildInstruction::InsertArgument(
+                                    self.read_argument_reference()?,
+                                ));
+                            }
+                            tok => {
+                                return error_received_expected!(tok, "Stream / Argument");
+                            }
+                        }
+                    }
+
+                    Keyword::Remove => {
+                        let next_token = self.next_lex()?;
+                        match next_token {
+                            TokenType::QMLCode {
+                                qml_code: mut code,
+                                stream_character: _,
+                            } => {
+                                trim_token_stream(&mut code);
+                                instructions.push(RebuildInstruction::Remove(
+                                    RemoveRebuildAction::Stream(code),
+                                ));
+                            }
+                            TokenType::Keyword(Keyword::Located) => {
+                                instructions
+                                    .push(RebuildInstruction::Remove(RemoveRebuildAction::Located));
+                            }
+                            TokenType::Keyword(Keyword::Until) => {
+                                let next_token = self.next_lex()?;
+                                match next_token {
+                                    TokenType::Keyword(Keyword::End) => {
+                                        instructions.push(RebuildInstruction::Remove(
+                                            RemoveRebuildAction::UntilEnd,
+                                        ));
+                                    }
+                                    TokenType::QMLCode {
+                                        qml_code: mut code,
+                                        stream_character: _,
+                                    } => {
+                                        trim_token_stream(&mut code);
+                                        instructions.push(RebuildInstruction::Remove(
+                                            RemoveRebuildAction::UntilStream(code),
+                                        ));
+                                    }
+                                    _ => {
+                                        return error_received_expected!(
+                                            next_token,
+                                            "End / Stream"
+                                        );
+                                    }
+                                }
+                            }
+                            TokenType::Keyword(Keyword::Argument) => {
+                                instructions.push(RebuildInstruction::RemoveArgument(
+                                    self.read_argument_reference()?,
+                                ));
+                            }
+                            tok => {
+                                return error_received_expected!(
+                                    tok,
+                                    "Located / Stream / Until End / Until Stream / Argument"
+                                );
+                            }
+                        }
+                    }
+
+                    Keyword::Rename => {
+                        let next_token = self.next_lex()?;
+                        match next_token {
+                            TokenType::Keyword(Keyword::Argument) => {
+                                let arg_ref = self.read_argument_reference()?;
+                                let next_token = self.next_lex()?;
+                                if let TokenType::Keyword(Keyword::To) = next_token {
+                                    let name = self.next_id()?;
+                                    instructions
+                                        .push(RebuildInstruction::RenameArgument(arg_ref, name));
+                                } else {
+                                    return error_received_expected!(next_token, "TO - Name");
+                                }
+                            }
+                            other => {
+                                return error_received_expected!(other, "Argument - TO - Name");
+                            }
+                        }
+                    }
+
+                    Keyword::Replace => {
+                        let what = match self.next_lex()? {
+                            TokenType::QMLCode {
+                                qml_code: mut replace_what,
+                                stream_character: _,
+                            } => {
+                                trim_token_stream(&mut replace_what);
+                                ReplaceRebuildActionWhat::LiteralStream(replace_what)
+                            }
+                            TokenType::Keyword(Keyword::Located) => {
+                                ReplaceRebuildActionWhat::Located
+                            }
+                            other => {
+                                return error_received_expected!(other, "Stream - With - Stream / Stream - With - Stream - Until - Stream");
+                            }
+                        };
+                        let mut next_token = self.next_lex()?;
+                        let until_stream = if let TokenType::Keyword(Keyword::Until) = next_token {
+                            let next = self.next_lex()?;
+                            if let TokenType::QMLCode {
+                                mut qml_code,
+                                stream_character: _,
+                            } = next
+                            {
+                                next_token = self.next_lex()?;
+                                trim_token_stream(&mut qml_code);
+                                Some(qml_code)
+                            } else {
+                                return error_received_expected!(next, "Stream");
+                            }
+                        } else {
+                            None
+                        };
+
+                        if let TokenType::Keyword(Keyword::With) = next_token {
+                            let next = self.next_lex()?;
+                            if let TokenType::QMLCode {
+                                qml_code: mut new_contents,
+                                stream_character: _,
+                            } = next
+                            {
+                                trim_token_stream(&mut new_contents);
+                                instructions.push(RebuildInstruction::Replace(
+                                    ReplaceRebuildAction {
+                                        what,
+                                        until_stream,
+                                        new_contents,
+                                    },
+                                ));
+                            } else {
+                                return error_received_expected!(next, "Stream");
+                            }
+                        } else {
+                            return error_received_expected!(
+                                next_token,
+                                "With - Stream / Until - Stream - With - Stream"
+                            );
+                        }
+                    }
+
+                    Keyword::Locate => {
+                        let location = match self.next_lex()? {
+                            TokenType::Keyword(Keyword::After) => Location::After,
+                            TokenType::Keyword(Keyword::Before) => Location::Before,
+                            other => {
+                                return error_received_expected!(other, "Before / After");
+                            }
+                        };
+                        let selector = match self.next_lex()? {
+                            TokenType::Keyword(Keyword::All) => LocateRebuildActionSelector::All,
+                            TokenType::QMLCode {
+                                qml_code: mut code,
+                                stream_character: _,
+                            } => {
+                                trim_token_stream(&mut code);
+                                LocateRebuildActionSelector::Stream(code)
+                            }
+                            other => {
+                                return error_received_expected!(other, "All / Stream");
+                            }
+                        };
+                        instructions.push(RebuildInstruction::Locate(LocateRebuildAction {
+                            location,
+                            selector,
+                        }));
+                    }
+                }
+            } else {
+                return error_received_expected!(next, "Rebuild directive keyword");
+            }
+        }
+    }
+
     pub fn read_next_instruction(&mut self, in_slot: bool) -> Result<FileChangeAction> {
         let next = self.next_lex()?;
         if let TokenType::Keyword(kw) = next {
             match kw {
+                Keyword::Rebuild => {
+                    let selector = self.read_node()?;
+                    Ok(FileChangeAction::Rebuild(RebuildAction {
+                        selector,
+                        actions: self.read_rebuild_instructions()?,
+                    }))
+                }
                 Keyword::Import => {
                     let name = self.next_id()?;
                     let version = self.next_id()?;
@@ -312,7 +637,10 @@ impl Parser<'_> {
                             let template_name = self.next_id()?;
                             self.discard_whitespace();
                             let next_token = match self.next_lex() {
-                                Ok(TokenType::QMLCode(code)) => code,
+                                Ok(TokenType::QMLCode {
+                                    qml_code: code,
+                                    stream_character: _,
+                                }) => code,
                                 _ => {
                                     return Err(Error::msg("Expected 'INSERT TEMPLATE <name> {}"));
                                 }
@@ -326,9 +654,10 @@ impl Parser<'_> {
                         TokenType::Keyword(Keyword::Slot) => {
                             Ok(FileChangeAction::Insert(Insertable::Slot(self.next_id()?)))
                         }
-                        TokenType::QMLCode(code) => {
-                            Ok(FileChangeAction::Insert(Insertable::Code(code)))
-                        }
+                        TokenType::QMLCode {
+                            qml_code: code,
+                            stream_character: _,
+                        } => Ok(FileChangeAction::Insert(Insertable::Code(code))),
                         _ => error_received_expected!(next, "QML code"),
                     }
                 }
@@ -342,7 +671,11 @@ impl Parser<'_> {
                 | Keyword::Load
                 | Keyword::To
                 | Keyword::Slot
-                | Keyword::With => error_received_expected!(kw, "Directive keyword"),
+                | Keyword::With
+                | Keyword::Argument
+                | Keyword::Until
+                | Keyword::Located
+                | Keyword::At => error_received_expected!(kw, "Directive keyword"),
 
                 Keyword::Assert => Ok(FileChangeAction::Assert(self.read_tree()?)),
                 Keyword::End => {
@@ -395,8 +728,11 @@ impl Parser<'_> {
                     }
                     let next = self.next_lex()?;
                     match next {
-                        TokenType::QMLCode(code) => Ok(FileChangeAction::Replace(ReplaceAction {
-                            content: Insertable::Code(code),
+                        TokenType::QMLCode {
+                            qml_code,
+                            stream_character: _,
+                        } => Ok(FileChangeAction::Replace(ReplaceAction {
+                            content: Insertable::Code(qml_code),
                             selector: node,
                         })),
                         TokenType::Keyword(Keyword::Slot) => {
@@ -433,12 +769,11 @@ impl Parser<'_> {
             };
             let mut parser = Self::new(
                 Box::new(
-                    Lexer::new(file_contents)
+                    Lexer::new(StringCharacterTokenizer::new(file_contents))
                         .collect::<Vec<TokenType>>()
                         .into_iter(),
                 ),
                 self.root_path.clone(),
-                self.hashtab,
             );
             output.extend(parser.parse()?);
             Ok(())
@@ -500,7 +835,10 @@ impl Parser<'_> {
                     TokenType::Keyword(Keyword::Template) => {
                         let name = self.next_id()?;
                         let data = match self.next_lex() {
-                            Ok(TokenType::QMLCode(c)) => c,
+                            Ok(TokenType::QMLCode {
+                                qml_code,
+                                stream_character: _,
+                            }) => qml_code,
                             _ => panic!("Expected TEMPLATE <name> {{...}}"),
                         };
                         output.push(Change {
@@ -542,12 +880,10 @@ impl Parser<'_> {
     pub fn new(
         token_stream: Box<dyn Iterator<Item = TokenType>>,
         root_path: Option<String>,
-        hashtab: &HashTab,
     ) -> Parser {
         Parser {
             stream: token_stream.peekable(),
             root_path,
-            hashtab,
         }
     }
 }

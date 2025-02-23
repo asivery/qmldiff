@@ -5,7 +5,7 @@ use anyhow::Result;
 use crate::{
     hashtab::HashTab,
     parser::{
-        common::IteratorPipeline,
+        common::{IteratorPipeline, StringCharacterTokenizer},
         diff::{self, hash_processor::diff_hash_remapper, parser::Change},
         qml::{
             self,
@@ -35,11 +35,11 @@ pub fn parse_diff(
     contents: String,
     hashtab: &HashTab,
 ) -> Result<Vec<Change>> {
-    let lexer = diff::lexer::Lexer::new(contents);
+    let lexer = diff::lexer::Lexer::new(StringCharacterTokenizer::new(contents));
     let tokens: Vec<diff::lexer::TokenType> = lexer
         .map(|e| diff_hash_remapper(hashtab, e).unwrap())
         .collect();
-    let mut parser = diff::parser::Parser::new(Box::new(tokens.into_iter()), root_dir, hashtab);
+    let mut parser = diff::parser::Parser::new(Box::new(tokens.into_iter()), root_dir);
 
     parser.parse()
 }
@@ -49,7 +49,9 @@ pub fn parse_qml(
     hashtab: Option<&HashTab>,
     slots: Option<&mut Slots>,
 ) -> Result<Vec<TreeElement>> {
-    let mut iterator = IteratorPipeline::new(Box::from(Lexer::new(raw_qml)));
+    let mut iterator = IteratorPipeline::new(Box::from(Lexer::new(StringCharacterTokenizer::new(
+        raw_qml,
+    ))));
     let mut hash_mapper;
     if hashtab.is_some() {
         hash_mapper = QMLHashRemapper::new(hashtab.unwrap());
