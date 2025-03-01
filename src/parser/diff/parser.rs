@@ -767,13 +767,18 @@ impl Parser {
                     )))
                 }
             };
+            let moved_root = if let Some(e) = Path::new(file).parent() {
+                String::from(Path::new(root).join(&e).to_string_lossy())
+            } else {
+                root.clone()
+            };
             let mut parser = Self::new(
                 Box::new(
                     Lexer::new(StringCharacterTokenizer::new(file_contents))
                         .collect::<Vec<TokenType>>()
                         .into_iter(),
                 ),
-                self.root_path.clone(),
+                Some(moved_root),
             );
             output.extend(parser.parse()?);
             Ok(())
