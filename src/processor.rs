@@ -332,7 +332,7 @@ fn find_beginning_of_function(stream: &Vec<TokenType>, mut start: usize) -> usiz
     while start < stream.len() {
         match stream[start] {
             TokenType::Symbol('{') => {
-                return start + 1;
+                return start;
             }
             TokenType::Whitespace(_) | TokenType::Comment(_) | TokenType::NewLine(_) => {
                 start += 1;
@@ -359,13 +359,21 @@ fn build_arguments_token_stream(args: Vec<String>) -> Vec<TokenType> {
     tokens
 }
 
-fn build_arrow_func(arguments: Vec<String>, body: Vec<TokenType>) -> Vec<TokenType> {
+fn build_arrow_func(
+    arguments: Vec<String>,
+    body: Vec<TokenType>,
+    enclosed: bool,
+) -> Vec<TokenType> {
     let mut base = build_arguments_token_stream(arguments);
     base.push(TokenType::Unknown('='));
     base.push(TokenType::Unknown('>'));
-    base.push(TokenType::Symbol('{'));
+    if enclosed {
+        base.push(TokenType::Symbol('{'));
+    }
     base.extend(body);
-    base.push(TokenType::Symbol('}'));
+    if enclosed {
+        base.push(TokenType::Symbol('}'));
+    }
     base
 }
 
@@ -381,6 +389,7 @@ fn find_substream_in_stream(
         }
         for (i, entry) in needle.iter().enumerate() {
             if haystack.get(i + start) != Some(entry) {
+                start += i;
                 continue 'main;
             }
         }
@@ -427,34 +436,36 @@ fn rebuild_child(
         }
     }
 
-    let mut main_body_stream = if arguments.is_some() {
+    let (mut main_body_stream, is_enclosed) = if arguments.is_some() {
         match child {
             TranslatedObjectChild::Function(func) => {
                 func.body.remove(0);
                 func.body.pop();
-                take(&mut func.body)
+                (take(&mut func.body), true)
             }
             TranslatedObjectChild::Assignment(assign) => match assign.value {
                 AssignmentChildValue::Other(ref mut stream) => {
-                    let begin = find_beginning_of_function(&stream, arguments_token_length);
-                    let end = if stream.last() == Some(&TokenType::Symbol('}')) {
-                        stream.len() - 1
-                    } else {
-                        stream.len()
-                    };
-                    Vec::from(&stream[begin..end])
+                    let mut begin = find_beginning_of_function(&stream, arguments_token_length);
+                    let mut end = stream.len();
+                    let enclosed = stream.first() == Some(&TokenType::Symbol('{'));
+                    if enclosed {
+                        begin += 1;
+                        end -= 1;
+                    }
+                    (Vec::from(&stream[begin..end]), enclosed)
                 }
                 _ => unreachable!(),
             },
             TranslatedObjectChild::Property(prop) => match prop.default_value {
                 Some(AssignmentChildValue::Other(ref mut stream)) => {
-                    let begin = find_beginning_of_function(&stream, arguments_token_length);
-                    let end = if stream.last() == Some(&TokenType::Symbol('}')) {
-                        stream.len() - 1
-                    } else {
-                        stream.len()
-                    };
-                    Vec::from(&stream[begin..end])
+                    let mut begin = find_beginning_of_function(&stream, arguments_token_length);
+                    let mut end = stream.len();
+                    let enclosed = stream.first() == Some(&TokenType::Symbol('{'));
+                    if enclosed {
+                        begin += 1;
+                        end -= 1;
+                    }
+                    (Vec::from(&stream[begin..end]), enclosed)
                 }
                 _ => unreachable!(),
             },
@@ -471,12 +482,12 @@ fn rebuild_child(
                     } else {
                         stream.len()
                     };
-                    Vec::from(&stream[begin..end])
+                    (Vec::from(&stream[begin..end]), false)
                 }
                 _ => unreachable!(),
             },
             TranslatedObjectChild::Property(prop) => match prop.default_value {
-                Some(AssignmentChildValue::Other(ref mut stream)) => take(stream),
+                Some(AssignmentChildValue::Other(ref mut stream)) => (take(stream), false),
                 _ => unreachable!(),
             },
             _ => unreachable!(),
@@ -561,7 +572,7 @@ fn rebuild_child(
                             None => {
                                 return Err(Error::msg(format!(
                                     "Cannot locate the substream [{:?}]",
-                                    current_position
+                                    stream
                                 )));
                             }
                         };
@@ -613,6 +624,7 @@ fn rebuild_child(
                         main_body_stream.splice(position.., vec![]);
                     }
                     RemoveRebuildAction::UntilStream(until_stream) => {
+                        located = Some(until_stream.clone());
                         if let Some(until_stream_location) =
                             find_substream_in_stream(&main_body_stream, until_stream, position)
                         {
@@ -665,7 +677,10 @@ fn rebuild_child(
                         };
                     until_position -= source_stream.len();
                     position = found_index;
-                    main_body_stream.splice(position..position + source_stream.len(), replace.new_contents.clone());
+                    main_body_stream.splice(
+                        position..position + source_stream.len(),
+                        replace.new_contents.clone(),
+                    );
                     counter += 1;
                 }
                 if counter == 0 {
@@ -683,16 +698,21 @@ fn rebuild_child(
     match child {
         TranslatedObjectChild::Function(func) => {
             // Yes - reserialize args, rebuild body
-            main_body_stream.insert(0, TokenType::Symbol('{'));
-            main_body_stream.push(TokenType::Symbol('}'));
+            if is_enclosed {
+                main_body_stream.insert(0, TokenType::Symbol('{'));
+                main_body_stream.push(TokenType::Symbol('}'));
+            }
             func.body = main_body_stream;
             func.arguments = build_arguments_token_stream(arguments.unwrap());
         }
         TranslatedObjectChild::Assignment(assign) => {
             if let Some(arguments) = arguments {
                 // This used to be a function. Regenerate fully.
-                assign.value =
-                    AssignmentChildValue::Other(build_arrow_func(arguments, main_body_stream));
+                assign.value = AssignmentChildValue::Other(build_arrow_func(
+                    arguments,
+                    main_body_stream,
+                    is_enclosed,
+                ));
             } else {
                 // Simple non-function
                 assign.value = AssignmentChildValue::Other(main_body_stream);
@@ -704,6 +724,7 @@ fn rebuild_child(
                 prop.default_value = Some(AssignmentChildValue::Other(build_arrow_func(
                     arguments,
                     main_body_stream,
+                    is_enclosed,
                 )));
             } else {
                 // Simple non-function
