@@ -256,6 +256,60 @@ Updates the cursor to after the renamed element.
 This statement can only be used within the direct scope of the `AFFECT` block (i.e. Not in a `SLOT` or `TRAVERSE` block).
 It adds an import to the top of the QML file.
 
+#### `REBUILD <property>`
+
+This statement is only valid for JS functions, non-object assignments and non-object properties. It rebuilds the token stream the value consists of.
+It's a block statement, so you need to end the `REBUILD` block with `END REBUILD`.
+The rebuild block essentially defines its own separate language, described below.
+
+Within the `REBUILD` block, another cursor is created. The commands within it move the cursor around, assert whether or not the expected data is located at the cursor and edit the tokens the value is made from. There also exists a special "variable" called `LOCATED`, which sometimes can be used instead of providing the token stream. The contents of that variable are updated by some statements.
+
+> [!NOTE]
+> QML token streams can either be provided by enclosing them in curly braces: `{ qmlCodeGoesHere }` or, in case of non-valid QML blocks: `STREAM <ending_token> qmlCodeGoesHere <ending_token>`
+> Example:
+> `STREAM / if(a) { /`
+
+
+##### `INSERT ARGUMENT <name> AT <position>`
+
+This statement is only valid for functions - it adds an argument to the list of arguments in the function declaration. `position` is zero-indexed.
+
+##### `REMOVE ARGUMENT <name> AT <position>`
+
+Removes the argument called `name` at `position`. Only valid for functions.
+
+##### `RENAME ARGUMENT <name> AT <position> TO <new_name>`.
+
+Renames the argument called `name` located at `position` to `new_name`. Only valid for functions.
+
+##### `INSERT <QML Code>`
+
+Inserts the provided QML code at the cursor position.
+
+##### `REMOVE <QML Code>` / `REMOVE LOCATED`
+
+Checks if the provided QML code is at the current cursor position, then removes it.
+
+##### `REMOVE UNTIL END` / `REMOVE UNTIL <QML Code>`
+
+Removes all tokens until end of stream / until the provided QML Code is found.
+
+##### `LOCATE [BEFORE / AFTER] ALL`
+
+Sets the cursor to either the beginning, or the end of the stream and clears the `LOCATED` variable.
+
+##### `LOCATE [BEFORE / AFTER] <QML Code>`
+
+Sets the cursor to either before or after the provided QML code. Sets the `LOCATED` variable to that code.
+
+##### `REPLACE [LOCATED / <QML Code>] UNTIL <QML Code> WITH <QML Code>`
+
+Starting at the current cursor position, tries to find all instances of either the contents of the `LOCATED` variable or the provided QML stream, and replaces it with the provided value until the QML code in the `UNTIL` clause is encountered.
+
+##### `REPLACE [LOCATED / <QML Code>] WITH <QML Code>`
+
+See above, but always replaces until the end of stream is encountered.
+
 
 ### Selectors
 
