@@ -476,13 +476,7 @@ fn rebuild_child(
         match child {
             TranslatedObjectChild::Assignment(assign) => match assign.value {
                 AssignmentChildValue::Other(ref mut stream) => {
-                    let begin = find_beginning_of_function(&stream, arguments_token_length);
-                    let end = if stream.last() == Some(&TokenType::Symbol('}')) {
-                        stream.len() - 1
-                    } else {
-                        stream.len()
-                    };
-                    (Vec::from(&stream[begin..end]), false)
+                    (take(stream), false)
                 }
                 _ => unreachable!(),
             },
