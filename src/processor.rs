@@ -332,7 +332,7 @@ fn find_beginning_of_function(stream: &Vec<TokenType>, mut start: usize) -> usiz
     while start < stream.len() {
         match stream[start] {
             TokenType::Symbol('{') => {
-                return start;
+                break;
             }
             TokenType::Whitespace(_) | TokenType::Comment(_) | TokenType::NewLine(_) => {
                 start += 1;
@@ -447,7 +447,7 @@ fn rebuild_child(
                 AssignmentChildValue::Other(ref mut stream) => {
                     let mut begin = find_beginning_of_function(&stream, arguments_token_length);
                     let mut end = stream.len();
-                    let enclosed = stream.first() == Some(&TokenType::Symbol('{'));
+                    let enclosed = stream[begin] == TokenType::Symbol('{');
                     if enclosed {
                         begin += 1;
                         end -= 1;
@@ -460,7 +460,7 @@ fn rebuild_child(
                 Some(AssignmentChildValue::Other(ref mut stream)) => {
                     let mut begin = find_beginning_of_function(&stream, arguments_token_length);
                     let mut end = stream.len();
-                    let enclosed = stream.first() == Some(&TokenType::Symbol('{'));
+                    let enclosed = stream[begin] == TokenType::Symbol('{');
                     if enclosed {
                         begin += 1;
                         end -= 1;
