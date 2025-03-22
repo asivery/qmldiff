@@ -4,6 +4,9 @@
 
 ### Statements
 
+> [!NOTE]
+> Required parameters are marked as `<required>`, and optional ones as `[optional]`
+
 QMLDiff defines its own language for modifying QML trees. The language's syntax is partially inspired by BASIC, and the JS DOM's querySelector syntax.
 
 In the global scope, you are required to define which file
