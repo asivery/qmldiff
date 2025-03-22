@@ -2,9 +2,7 @@
 use hashrules::HashRules;
 use hashtab::{merge_hash_file, serialize_hashtab, HashTab};
 use lazy_static::lazy_static;
-use lib_util::{
-    extract_tree_node, include_if_building_hashtab, is_building_hashtab, is_extracting_tree,
-};
+use lib_util::{include_if_building_hashtab, is_building_hashtab};
 use parser::diff::parser::{Change, ObjectToChange};
 use parser::qml::emitter::emit_string;
 use processor::find_and_process;
@@ -57,7 +55,7 @@ extern "C" fn qmldiff_add_external_diff(
     change_file_contents: *const c_char,
     file_identifier: *const c_char,
 ) -> bool {
-    if is_extracting_tree() || is_building_hashtab() {
+    if is_building_hashtab() {
         return false;
     }
 
@@ -111,7 +109,7 @@ fn load_hashtab(root_dir: &str) {
 
 #[no_mangle]
 extern "C" fn qmldiff_build_change_files(root_dir: *const c_char) -> i32 {
-    if is_extracting_tree() || is_building_hashtab() {
+    if is_building_hashtab() {
         return 0;
     }
 
@@ -167,7 +165,7 @@ extern "C" fn qmldiff_build_change_files(root_dir: *const c_char) -> i32 {
 pub unsafe extern "C" fn qmldiff_is_modified(file_name: *const c_char) -> bool {
     let file_name: String = CStr::from_ptr(file_name).to_str().unwrap().into();
 
-    if is_extracting_tree() || is_building_hashtab() {
+    if is_building_hashtab() {
         return true;
     }
 
@@ -186,7 +184,7 @@ pub unsafe extern "C" fn qmldiff_is_modified(file_name: *const c_char) -> bool {
 pub unsafe extern "C" fn qmldiff_process_file(
     file_name: *const c_char,
     raw_contents: *const c_char,
-    contents_size: usize,
+    _contents_size: usize,
 ) -> *const c_char {
     let mut post_init = POST_INIT.lock().unwrap();
     if !*post_init {
@@ -205,39 +203,29 @@ pub unsafe extern "C" fn qmldiff_process_file(
         return std::ptr::null();
     }
 
-    if extract_tree_node(
-        &file_name,
-        std::slice::from_raw_parts(raw_contents as *const u8, contents_size),
-    ) {
-        return std::ptr::null();
-    }
-
-    {
-        let changes = CHANGES.lock().unwrap();
-        // It is modified.
-        // Build the tree.
-        let contents: String = CStr::from_ptr(raw_contents).to_str().unwrap().into();
-        let tree = parse_qml(contents, None, None);
-        eprintln!("[qmldiff]: Processing file {}...", &file_name);
-        match tree {
-            Ok(tree) => {
-                let mut tree = translate_from_root(tree);
-                let slots = &mut SLOTS.lock().unwrap();
-                match find_and_process(&file_name, &mut tree, &changes, slots) {
-                    Ok(()) => {
-                        let raw_tree = untranslate_from_root(tree);
-                        let emitted_string = CString::new(emit_string(&raw_tree).as_str()).unwrap();
-                        let ret = emitted_string.as_ptr();
-                        std::mem::forget(emitted_string);
-                        return ret;
-                    }
-                    Err(e) => eprintln!("[qmldiff]: Error while processing file tree: {:?}", e),
+    let changes = CHANGES.lock().unwrap();
+    // It is modified.
+    // Build the tree.
+    let contents: String = CStr::from_ptr(raw_contents).to_str().unwrap().into();
+    let tree = parse_qml(contents, None, None);
+    eprintln!("[qmldiff]: Processing file {}...", &file_name);
+    match tree {
+        Ok(tree) => {
+            let mut tree = translate_from_root(tree);
+            let slots = &mut SLOTS.lock().unwrap();
+            match find_and_process(&file_name, &mut tree, &changes, slots) {
+                Ok(()) => {
+                    let raw_tree = untranslate_from_root(tree);
+                    let emitted_string = CString::new(emit_string(&raw_tree).as_str()).unwrap();
+                    let ret = emitted_string.as_ptr();
+                    std::mem::forget(emitted_string);
+                    return ret;
                 }
+                Err(e) => eprintln!("[qmldiff]: Error while processing file tree: {:?}", e),
             }
-            Err(e) => eprintln!("[qmldiff]: Error while parsing file tree: {:?}", e),
         }
+        Err(e) => eprintln!("[qmldiff]: Error while parsing file tree: {:?}", e),
     }
-
     std::ptr::null()
 }
 

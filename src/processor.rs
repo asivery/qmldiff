@@ -475,9 +475,7 @@ fn rebuild_child(
         // Not a function!
         match child {
             TranslatedObjectChild::Assignment(assign) => match assign.value {
-                AssignmentChildValue::Other(ref mut stream) => {
-                    (take(stream), false)
-                }
+                AssignmentChildValue::Other(ref mut stream) => (take(stream), false),
                 _ => unreachable!(),
             },
             TranslatedObjectChild::Property(prop) => match prop.default_value {
@@ -565,8 +563,8 @@ fn rebuild_child(
                             Some(n) => n,
                             None => {
                                 return Err(Error::msg(format!(
-                                    "Cannot locate the substream [{:?}]",
-                                    stream
+                                    "Cannot locate the substream [{:?}] in [{:?}]",
+                                    stream, &main_body_stream
                                 )));
                             }
                         };
