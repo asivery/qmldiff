@@ -119,6 +119,7 @@ pub struct RenameAction {
 pub struct RebuildAction {
     pub selector: NodeSelector,
     pub actions: Vec<RebuildInstruction>,
+    pub redefine: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -359,7 +360,7 @@ impl Parser {
         }
     }
 
-    fn read_rebuild_instructions(&mut self) -> Result<Vec<RebuildInstruction>> {
+    fn read_rebuild_instructions(&mut self, is_redefine: bool) -> Result<Vec<RebuildInstruction>> {
         let mut instructions = Vec::new();
         loop {
             let next = self.next_lex()?;
@@ -368,7 +369,10 @@ impl Parser {
                     Keyword::End => {
                         let next = self.next_lex()?;
                         match next {
-                            TokenType::Keyword(Keyword::Rebuild) => {
+                            TokenType::Keyword(Keyword::Redefine) if is_redefine => {
+                                return Ok(instructions);
+                            }
+                            TokenType::Keyword(Keyword::Rebuild) if !is_redefine => {
                                 return Ok(instructions);
                             }
                             _ => {
@@ -394,7 +398,8 @@ impl Parser {
                     | Keyword::Argument
                     | Keyword::At
                     | Keyword::Located
-                    | Keyword::Rebuild => {
+                    | Keyword::Rebuild
+                    | Keyword::Redefine => {
                         return error_received_expected!(kw, "Rebuild directive keyword");
                     }
 
@@ -595,7 +600,16 @@ impl Parser {
                     let selector = self.read_node()?;
                     Ok(FileChangeAction::Rebuild(RebuildAction {
                         selector,
-                        actions: self.read_rebuild_instructions()?,
+                        actions: self.read_rebuild_instructions(false)?,
+                        redefine: false,
+                    }))
+                }
+                Keyword::Redefine => {
+                    let selector = self.read_node()?;
+                    Ok(FileChangeAction::Rebuild(RebuildAction {
+                        selector,
+                        actions: self.read_rebuild_instructions(true)?,
+                        redefine: true,
                     }))
                 }
                 Keyword::Import => {

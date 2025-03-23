@@ -3,11 +3,10 @@ use std::{collections::HashMap, mem::take};
 
 use crate::{
     parser::{
-        common::{IteratorPipeline, StringCharacterTokenizer},
+        common::IteratorPipeline,
         diff::parser::{Change, FileChangeAction, Insertable, ObjectToChange, ReplaceAction},
         qml::{
-            self,
-            emitter::{emit_object, flatten_lines},
+            emitter::emit_object_to_token_stream,
             lexer::TokenType,
             parser::{AssignmentChildValue, ObjectChild, TreeElement},
             slot_extensions::QMLSlotRemapper,
@@ -112,9 +111,7 @@ impl Slots {
                     });
                 }
                 ObjectChild::ObjectAssignment(assignment) => {
-                    // TODO: Make it better.
-                    let stream = qml::lexer::Lexer::new(StringCharacterTokenizer::new(flatten_lines(&emit_object(&assignment.value, 0))));
-                    insert_or_append!(assignment.name, stream.collect::<Vec<_>>());
+                    insert_or_append!(assignment.name, emit_object_to_token_stream(&assignment.value, false));
                 }
                 _ => return Err(Error::msg(
                     "Cannot process template invocation. Only simple / object assignments are supported.",

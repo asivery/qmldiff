@@ -1,5 +1,7 @@
 use std::fmt::Display;
 
+use crate::parser::qml::lexer::Keyword;
+
 use super::{
     lexer::TokenType,
     parser::{
@@ -118,6 +120,134 @@ fn emit_assignment_child_value(value: &AssignmentChildValue, indent: usize) -> V
         //     temporary_lines
         // }
     }
+}
+
+fn _emit_object_to_token_stream(object: &Object, stream: &mut Vec<TokenType>, only_body: bool) {
+    macro_rules! add {
+        ($a: expr) => {
+            stream.push($a);
+            stream.push(TokenType::Whitespace(" ".into()));
+        };
+    }
+    macro_rules! id {
+        ($a: expr) => {
+            add!(TokenType::Identifier($a));
+        };
+    }
+    macro_rules! nl {
+        () => {
+            add!(TokenType::NewLine(0));
+        };
+    }
+    macro_rules! emit_token_stream_property_prologue {
+        ($prop: expr) => {
+            for modifier in &$prop.modifiers {
+                add!(TokenType::Keyword(modifier.clone()));
+            }
+            if let Some(r#type) = &$prop.r#type {
+                add!(TokenType::Identifier(r#type.clone()));
+            }
+            add!(TokenType::Identifier($prop.name.clone()));
+        };
+    }
+
+    if !only_body {
+        id!(object.name.clone());
+        add!(TokenType::Symbol('{'));
+        nl!();
+    }
+    for child in &object.children {
+        match child {
+            ObjectChild::Abstract(_) => panic!("Cannot emit abstract to token stream!"),
+            ObjectChild::ObjectAssignment(assignment) => {
+                id!(assignment.name.clone());
+                add!(TokenType::Symbol(':'));
+                _emit_object_to_token_stream(&assignment.value, stream, false);
+            }
+            ObjectChild::Assignment(assignment) => {
+                // HACK: See comment in parser:
+                if assignment.name.contains(" ") {
+                    for e in assignment.name.split(" ") {
+                        id!(e.into());
+                    }
+                } else {
+                    id!(assignment.name.clone());
+                }
+                add!(TokenType::Symbol(':'));
+                match &assignment.value {
+                    AssignmentChildValue::Object(obj) => {
+                        _emit_object_to_token_stream(obj, stream, false);
+                    }
+                    AssignmentChildValue::Other(other) => stream.extend_from_slice(other),
+                }
+            }
+            ObjectChild::Enum(r#enum) => {
+                add!(TokenType::Keyword(Keyword::Enum));
+                id!(r#enum.name.clone());
+                add!(TokenType::Symbol('{'));
+                nl!();
+                for val in &r#enum.values {
+                    id!(val.0.clone());
+                    if let Some(value) = val.1 {
+                        add!(TokenType::Symbol('='));
+                        add!(TokenType::Number(value));
+                    }
+                    nl!();
+                }
+                add!(TokenType::Symbol('}'));
+            }
+            ObjectChild::Function(function) => {
+                add!(TokenType::Keyword(Keyword::Function));
+                id!(function.name.clone());
+                stream.extend_from_slice(&function.arguments);
+                stream.extend_from_slice(&function.body);
+            }
+            ObjectChild::Object(object) => {
+                _emit_object_to_token_stream(object, stream, false);
+            }
+            ObjectChild::Property(prop) => {
+                emit_token_stream_property_prologue!(prop);
+                match &prop.default_value {
+                    Some(AssignmentChildValue::Object(obj)) => {
+                        add!(TokenType::Symbol(':'));
+                        _emit_object_to_token_stream(obj, stream, false);
+                    }
+                    Some(AssignmentChildValue::Other(ts)) => {
+                        add!(TokenType::Symbol(':'));
+                        stream.extend_from_slice(ts);
+                    }
+                    None => {}
+                }
+            }
+            ObjectChild::ObjectProperty(prop) => {
+                emit_token_stream_property_prologue!(prop);
+                add!(TokenType::Symbol(':'));
+                _emit_object_to_token_stream(&prop.default_value, stream, false);
+            }
+            ObjectChild::Signal(sig) => {
+                add!(TokenType::Keyword(Keyword::Signal));
+                id!(sig.name.clone());
+                if let Some(ts) = &sig.arguments {
+                    stream.extend_from_slice(ts)
+                }
+            }
+            ObjectChild::Component(comp) => {
+                add!(TokenType::Keyword(Keyword::Component));
+                add!(TokenType::Symbol(':'));
+                _emit_object_to_token_stream(&comp.object, stream, false);
+            }
+        }
+        nl!();
+    }
+    if !only_body {
+        add!(TokenType::Symbol('}'));
+    }
+}
+
+pub fn emit_object_to_token_stream(object: &Object, only_body: bool) -> Vec<TokenType> {
+    let mut stream = vec![];
+    _emit_object_to_token_stream(object, &mut stream, only_body);
+    stream
 }
 
 fn emit_property_prologue<T>(prop: &PropertyChild<T>) -> String {

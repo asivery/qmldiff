@@ -11,15 +11,17 @@ use crate::parser::diff::parser::{
     ReplaceRebuildActionWhat,
 };
 use crate::parser::diff::parser::{NodeSelector, NodeTree, PropRequirement};
+use crate::parser::qml::emitter::emit_object_to_token_stream;
 use crate::parser::qml::lexer::TokenType;
-use crate::parser::qml::parser::{AssignmentChildValue, Import, ObjectChild, TreeElement};
+use crate::parser::qml::parser::{AssignmentChildValue, Import, Object, ObjectChild, TreeElement};
 use crate::parser::qml::slot_extensions::QMLSlotRemapper;
 use crate::refcell_translation::{
-    translate_object_child, TranslatedEnumChild, TranslatedObject, TranslatedObjectAssignmentChild,
-    TranslatedObjectChild, TranslatedObjectRef, TranslatedTree,
+    translate, translate_object_child, untranslate, untranslate_object_child, TranslatedEnumChild,
+    TranslatedObject, TranslatedObjectAssignmentChild, TranslatedObjectChild, TranslatedObjectRef,
+    TranslatedTree,
 };
 use crate::slots::Slots;
-use crate::util::common_util::parse_qml_from_chain;
+use crate::util::common_util::{parse_qml_from_chain, parse_qml_into_simple_object};
 
 use anyhow::{Error, Result};
 
@@ -377,114 +379,70 @@ fn build_arrow_func(
     base
 }
 
+fn is_whitespace(x: &TokenType) -> bool {
+    match x {
+        TokenType::NewLine(_) | TokenType::Whitespace(_) => true,
+        _ => false,
+    }
+}
+
 fn find_substream_in_stream(
     haystack: &Vec<TokenType>,
     needle: &Vec<TokenType>,
     mut start: usize,
-) -> Option<usize> {
+) -> Option<(usize, usize)> {
     let haystack_len = haystack.len();
+    let needle_len = needle.len();
+    let mut needle_initial_offset = 0usize;
+    while needle_initial_offset < needle_len && is_whitespace(&needle[needle_initial_offset]) {
+        needle_initial_offset += 1;
+    }
     'main: while start < haystack_len {
-        while start < haystack_len && haystack[start] != needle[0] {
-            start += 1;
+        let mut haystack_offset = 0usize;
+        // Greedily extend our haystack offset to glob as much as possible
+        while (start + haystack_offset) < haystack_len
+            && is_whitespace(&haystack[start + haystack_offset])
+        {
+            haystack_offset += 1;
         }
-        for (i, entry) in needle.iter().enumerate() {
-            if haystack.get(i + start) != Some(entry) {
-                start += i;
+        if start + haystack_offset >= haystack_len {
+            return None;
+        }
+        if haystack[start + haystack_offset] != needle[needle_initial_offset] {
+            start += haystack_offset + 1;
+            continue;
+        }
+
+        let mut total_len = haystack_offset;
+        let mut needle_offset = needle_initial_offset;
+        while needle_offset < needle_len {
+            while needle_offset < needle_len && is_whitespace(&needle[needle_offset]) {
+                needle_offset += 1;
+            }
+            while (needle_offset + start + haystack_offset < haystack_len)
+                && is_whitespace(&haystack[needle_offset + start + haystack_offset])
+            {
+                haystack_offset += 1;
+                total_len += 1;
+            }
+            if haystack[needle_offset + start + haystack_offset] != needle[needle_offset] {
+                start += needle_offset + haystack_offset;
                 continue 'main;
             }
+            total_len += 1;
+            needle_offset += 1;
         }
-        return Some(start);
+        return Some((start, total_len));
     }
     None
 }
 
-fn rebuild_child(
+fn execute_rebuild_steps(
     rebuild_instructions: &RebuildAction,
-    child: &mut TranslatedObjectChild,
+    arguments: &mut Option<Vec<String>>,
+    main_body_stream: &mut Vec<TokenType>,
 ) -> Result<()> {
     let mut position = usize::MAX;
-
-    let mut arguments_token_length = 0;
-    let mut arguments = None;
-    match child {
-        TranslatedObjectChild::Assignment(assign) => match &assign.value {
-            AssignmentChildValue::Other(stream) => {
-                if let Ok((a, b)) = parse_argument_stream(&stream) {
-                    arguments = Some(a);
-                    arguments_token_length = b;
-                }
-            }
-            _ => unreachable!(),
-        },
-        TranslatedObjectChild::Function(func) => {
-            let (a, b) = parse_argument_stream(&func.arguments)?;
-            arguments = Some(a);
-            arguments_token_length = b;
-        }
-        TranslatedObjectChild::Property(prop) => match &prop.default_value {
-            Some(AssignmentChildValue::Other(stream)) => {
-                if let Ok((a, b)) = parse_argument_stream(&stream) {
-                    arguments = Some(a);
-                    arguments_token_length = b;
-                }
-            }
-            None => {}
-            _ => unreachable!(),
-        },
-        _ => {
-            return Err(Error::msg("Can only rebuild functions / assignments!"));
-        }
-    }
-
-    let (mut main_body_stream, is_enclosed) = if arguments.is_some() {
-        match child {
-            TranslatedObjectChild::Function(func) => {
-                func.body.remove(0);
-                func.body.pop();
-                (take(&mut func.body), true)
-            }
-            TranslatedObjectChild::Assignment(assign) => match assign.value {
-                AssignmentChildValue::Other(ref mut stream) => {
-                    let mut begin = find_beginning_of_function(&stream, arguments_token_length);
-                    let mut end = stream.len();
-                    let enclosed = stream[begin] == TokenType::Symbol('{');
-                    if enclosed {
-                        begin += 1;
-                        end -= 1;
-                    }
-                    (Vec::from(&stream[begin..end]), enclosed)
-                }
-                _ => unreachable!(),
-            },
-            TranslatedObjectChild::Property(prop) => match prop.default_value {
-                Some(AssignmentChildValue::Other(ref mut stream)) => {
-                    let mut begin = find_beginning_of_function(&stream, arguments_token_length);
-                    let mut end = stream.len();
-                    let enclosed = stream[begin] == TokenType::Symbol('{');
-                    if enclosed {
-                        begin += 1;
-                        end -= 1;
-                    }
-                    (Vec::from(&stream[begin..end]), enclosed)
-                }
-                _ => unreachable!(),
-            },
-            _ => unreachable!(),
-        }
-    } else {
-        // Not a function!
-        match child {
-            TranslatedObjectChild::Assignment(assign) => match assign.value {
-                AssignmentChildValue::Other(ref mut stream) => (take(stream), false),
-                _ => unreachable!(),
-            },
-            TranslatedObjectChild::Property(prop) => match prop.default_value {
-                Some(AssignmentChildValue::Other(ref mut stream)) => (take(stream), false),
-                _ => unreachable!(),
-            },
-            _ => unreachable!(),
-        }
-    };
 
     macro_rules! not_functional_error {
         () => {
@@ -557,7 +515,7 @@ fn rebuild_child(
                 }
                 LocateRebuildActionSelector::Stream(stream) => {
                     let current_position = if position == usize::MAX { 0 } else { position };
-                    let new_base_pos =
+                    let (new_base_pos, length) =
                         match find_substream_in_stream(&main_body_stream, stream, current_position)
                         {
                             Some(n) => n,
@@ -570,7 +528,7 @@ fn rebuild_child(
                         };
                     located = Some(stream.clone());
                     match locate.location {
-                        Location::After => position = new_base_pos + stream.len(),
+                        Location::After => position = new_base_pos + length,
                         Location::Before => position = new_base_pos,
                     }
                 }
@@ -581,15 +539,20 @@ fn rebuild_child(
                         // Make sure we're located at the position the offending stream starts at:
                         unambiguous_position!();
                         if let Some(ref located) = located {
-                            if find_substream_in_stream(&main_body_stream, located, position)
-                                == Some(position)
+                            if let Some((position_located, length_located)) =
+                                find_substream_in_stream(&main_body_stream, located, position)
                             {
-                                // We're OK - remove
-                                main_body_stream.splice(position..position + located.len(), vec![]);
+                                if position_located == position {
+                                    // We're OK - remove
+                                    main_body_stream
+                                        .splice(position..position + length_located, vec![]);
+                                } else {
+                                    return Err(Error::msg(
+                                        "LOCATED substream not at current cursor position!",
+                                    ));
+                                }
                             } else {
-                                return Err(Error::msg(
-                                    "LOCATED substream not at current cursor position!",
-                                ));
+                                return Err(Error::msg("LOCATED substream not at found!"));
                             }
                         } else {
                             return Err(Error::msg(
@@ -600,11 +563,17 @@ fn rebuild_child(
                     RemoveRebuildAction::Stream(literal) => {
                         // Make sure the cursor is located where 'literal' starts at
                         unambiguous_position!();
-                        if find_substream_in_stream(&main_body_stream, literal, position)
-                            == Some(position)
+                        if let Some((found_position, length)) =
+                            find_substream_in_stream(&main_body_stream, literal, position)
                         {
-                            // We're OK - remove
-                            main_body_stream.splice(position..position + literal.len(), vec![]);
+                            if found_position == position {
+                                // We're OK - remove
+                                main_body_stream.splice(position..position + length, vec![]);
+                            } else {
+                                return Err(Error::msg(
+                                    "Requested substream to REMOVE could not be found",
+                                ));
+                            }
                         } else {
                             return Err(Error::msg(
                                 "Requested substream to REMOVE not at current index",
@@ -617,7 +586,7 @@ fn rebuild_child(
                     }
                     RemoveRebuildAction::UntilStream(until_stream) => {
                         located = Some(until_stream.clone());
-                        if let Some(until_stream_location) =
+                        if let Some((until_stream_location, _)) =
                             find_substream_in_stream(&main_body_stream, until_stream, position)
                         {
                             main_body_stream.splice(position..until_stream_location, vec![]);
@@ -647,7 +616,7 @@ fn rebuild_child(
                 let mut until_position = match &replace.until_stream {
                     Some(stream) => {
                         match find_substream_in_stream(&main_body_stream, stream, position) {
-                            Some(pos) => pos,
+                            Some((pos, _len)) => pos,
                             None => {
                                 return Err(Error::msg(format!(
                                     "Could not locate substream [{:?}] in stream!",
@@ -661,16 +630,16 @@ fn rebuild_child(
                 let mut counter = 0;
                 let mut position = position;
                 while position < until_position {
-                    let found_index =
+                    let (found_index, source_length) =
                         match find_substream_in_stream(&main_body_stream, &source_stream, position)
                         {
                             None => break,
                             Some(n) => n,
                         };
-                    until_position -= source_stream.len();
+                    until_position -= source_length;
                     position = found_index;
                     main_body_stream.splice(
-                        position..position + source_stream.len(),
+                        position..position + source_length,
                         replace.new_contents.clone(),
                     );
                     counter += 1;
@@ -684,7 +653,148 @@ fn rebuild_child(
             }
         }
     }
+    Ok(())
+}
 
+fn redefine_child(
+    rebuild_instructions: &RebuildAction,
+    child: TranslatedObjectChild,
+) -> Result<Vec<TranslatedObjectChild>> {
+    let reified_child = untranslate_object_child(child);
+    let mut child_token_stream = emit_object_to_token_stream(
+        &Object {
+            name: String::new(),
+            full_name: String::new(),
+            children: vec![reified_child],
+        },
+        true,
+    );
+    execute_rebuild_steps(rebuild_instructions, &mut None, &mut child_token_stream)?;
+    // Wrap in a temporary object:
+    child_token_stream.insert(0, TokenType::Identifier("Temporary".into()));
+    child_token_stream.insert(1, TokenType::Symbol('{'));
+    child_token_stream.push(TokenType::Symbol('}'));
+    let parsed_object = parse_qml_into_simple_object(child_token_stream)?;
+
+    Ok(parsed_object
+        .children
+        .into_iter()
+        .map(translate_object_child)
+        .collect::<Vec<_>>())
+}
+
+fn rebuild_child(
+    rebuild_instructions: &RebuildAction,
+    child: &mut TranslatedObjectChild,
+) -> Result<()> {
+    let mut arguments_token_length = 0;
+    let mut arguments = None;
+    match child {
+        TranslatedObjectChild::Assignment(assign) => match &assign.value {
+            AssignmentChildValue::Other(stream) => {
+                if let Ok((a, b)) = parse_argument_stream(&stream) {
+                    arguments = Some(a);
+                    arguments_token_length = b;
+                }
+            }
+            _ => unreachable!(),
+        },
+        TranslatedObjectChild::Function(func) => {
+            let (a, b) = parse_argument_stream(&func.arguments)?;
+            arguments = Some(a);
+            arguments_token_length = b;
+        }
+        TranslatedObjectChild::Property(prop) => match &prop.default_value {
+            Some(AssignmentChildValue::Object(_)) => {}
+            Some(AssignmentChildValue::Other(stream)) => {
+                if let Ok((a, b)) = parse_argument_stream(&stream) {
+                    arguments = Some(a);
+                    arguments_token_length = b;
+                }
+            }
+            None => {}
+        },
+        TranslatedObjectChild::Object(_) => {}
+        TranslatedObjectChild::ObjectAssignment(_) => {}
+        TranslatedObjectChild::ObjectProperty(_) => {}
+        _ => {
+            return Err(Error::msg(
+                "Can only rebuild functions / assignments / objects!",
+            ));
+        }
+    }
+
+    let (mut main_body_stream, is_enclosed, is_object) = if arguments.is_some() {
+        match child {
+            TranslatedObjectChild::Function(func) => {
+                func.body.remove(0);
+                func.body.pop();
+                (take(&mut func.body), true, false)
+            }
+            TranslatedObjectChild::Assignment(assign) => match assign.value {
+                AssignmentChildValue::Other(ref mut stream) => {
+                    let mut begin = find_beginning_of_function(&stream, arguments_token_length);
+                    let mut end = stream.len();
+                    let enclosed = stream[begin] == TokenType::Symbol('{');
+                    if enclosed {
+                        begin += 1;
+                        end -= 1;
+                    }
+                    (Vec::from(&stream[begin..end]), enclosed, false)
+                }
+                _ => unreachable!(),
+            },
+            TranslatedObjectChild::Property(prop) => match prop.default_value {
+                Some(AssignmentChildValue::Other(ref mut stream)) => {
+                    let mut begin = find_beginning_of_function(&stream, arguments_token_length);
+                    let mut end = stream.len();
+                    let enclosed = stream[begin] == TokenType::Symbol('{');
+                    if enclosed {
+                        begin += 1;
+                        end -= 1;
+                    }
+                    (Vec::from(&stream[begin..end]), enclosed, false)
+                }
+                _ => unreachable!(),
+            },
+            _ => unreachable!(),
+        }
+    } else {
+        // Not a function!
+        match child {
+            TranslatedObjectChild::Assignment(assign) => match assign.value {
+                AssignmentChildValue::Other(ref mut stream) => (take(stream), false, false),
+                AssignmentChildValue::Object(ref obj) => {
+                    (emit_object_to_token_stream(obj, false), false, true)
+                }
+            },
+            TranslatedObjectChild::Property(prop) => match prop.default_value {
+                Some(AssignmentChildValue::Other(ref mut stream)) => (take(stream), false, false),
+                Some(AssignmentChildValue::Object(ref obj)) => {
+                    (emit_object_to_token_stream(obj, false), false, true)
+                }
+
+                None => panic!("Cannot rebuild a nonexistent value of property!"),
+            },
+            TranslatedObjectChild::Object(obj) => (
+                emit_object_to_token_stream(&untranslate(take(obj)), false),
+                false,
+                true,
+            ),
+            TranslatedObjectChild::ObjectAssignment(obj) => (
+                emit_object_to_token_stream(&untranslate(take(&mut obj.value)), false),
+                false,
+                true,
+            ),
+            TranslatedObjectChild::ObjectProperty(obj) => (
+                emit_object_to_token_stream(&untranslate(take(&mut obj.default_value)), false),
+                false,
+                true,
+            ),
+            _ => unreachable!(),
+        }
+    };
+    execute_rebuild_steps(rebuild_instructions, &mut arguments, &mut main_body_stream)?;
     // Rebuild the original object.
     // Did we deal with a function?
     match child {
@@ -698,7 +808,11 @@ fn rebuild_child(
             func.arguments = build_arguments_token_stream(arguments.unwrap());
         }
         TranslatedObjectChild::Assignment(assign) => {
-            if let Some(arguments) = arguments {
+            if is_object {
+                assign.value = AssignmentChildValue::Object(
+                    parse_qml_into_simple_object(main_body_stream).unwrap(),
+                )
+            } else if let Some(arguments) = arguments {
                 // This used to be a function. Regenerate fully.
                 assign.value = AssignmentChildValue::Other(build_arrow_func(
                     arguments,
@@ -711,7 +825,11 @@ fn rebuild_child(
             }
         }
         TranslatedObjectChild::Property(prop) => {
-            if let Some(arguments) = arguments {
+            if is_object {
+                prop.default_value = Some(AssignmentChildValue::Object(
+                    parse_qml_into_simple_object(main_body_stream).unwrap(),
+                ))
+            } else if let Some(arguments) = arguments {
                 // This used to be a function. Regenerate fully.
                 prop.default_value = Some(AssignmentChildValue::Other(build_arrow_func(
                     arguments,
@@ -722,6 +840,15 @@ fn rebuild_child(
                 // Simple non-function
                 prop.default_value = Some(AssignmentChildValue::Other(main_body_stream));
             }
+        }
+        TranslatedObjectChild::Object(obj) => {
+            *obj = translate(parse_qml_into_simple_object(main_body_stream).unwrap());
+        }
+        TranslatedObjectChild::ObjectAssignment(obj) => {
+            obj.value = translate(parse_qml_into_simple_object(main_body_stream).unwrap());
+        }
+        TranslatedObjectChild::ObjectProperty(obj) => {
+            obj.default_value = translate(parse_qml_into_simple_object(main_body_stream).unwrap());
         }
         _ => unreachable!(),
     }
@@ -954,8 +1081,16 @@ pub fn process(absolute_root: &mut TranslatedTree, diff: &Change, slots: &mut Sl
                         return Err(Error::msg("Cannot rebuild an enum!"));
                     }
                     TreeRoot::Object(obj) => {
-                        let child_reference = &mut obj.borrow_mut().children[element_idx];
-                        rebuild_child(rebuild, child_reference)?;
+                        if rebuild.redefine {
+                            let child = obj.borrow_mut().children.remove(element_idx);
+                            let new_children = redefine_child(rebuild, child)?;
+                            obj.borrow_mut()
+                                .children
+                                .splice(element_idx..element_idx, new_children.into_iter());
+                        } else {
+                            let child_reference = &mut obj.borrow_mut().children[element_idx];
+                            rebuild_child(rebuild, child_reference)?;
+                        }
                     }
                 };
             }

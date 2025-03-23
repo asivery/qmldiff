@@ -36,6 +36,7 @@ pub enum Keyword {
     At,
     Located,
     Rebuild,
+    Redefine,
 }
 
 impl Display for Keyword {
@@ -66,6 +67,7 @@ impl Display for Keyword {
             Self::At => "AT",
             Self::Located => "LOCATED",
             Self::Rebuild => "REBUILD",
+            Self::Redefine => "REDEFINE",
         }))
     }
 }
@@ -100,6 +102,7 @@ impl TryFrom<&str> for Keyword {
             "AT" => Ok(Self::At),
             "LOCATED" => Ok(Self::Located),
             "REBUILD" => Ok(Self::Rebuild),
+            "REDEFINE" => Ok(Self::Redefine),
             _ => Err(anyhow::Error::msg(format!("Invalid keyword: {}", value))),
         }
     }

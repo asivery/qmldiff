@@ -156,6 +156,40 @@ pub fn translate(object: Object) -> TranslatedObjectRef {
     }))
 }
 
+pub fn untranslate_object_child(child: TranslatedObjectChild) -> ObjectChild {
+    match child {
+        TranslatedObjectChild::Abstract(z) => ObjectChild::Abstract(z),
+        TranslatedObjectChild::Assignment(z) => ObjectChild::Assignment(z),
+        TranslatedObjectChild::Function(z) => ObjectChild::Function(z),
+        TranslatedObjectChild::Property(z) => ObjectChild::Property(z),
+        TranslatedObjectChild::Signal(z) => ObjectChild::Signal(z),
+
+        TranslatedObjectChild::Component(z) => ObjectChild::Component(ComponentDefinition {
+            name: z.name,
+            object: untranslate(z.value),
+        }),
+        TranslatedObjectChild::ObjectProperty(z) => {
+            ObjectChild::ObjectProperty(PropertyChild::<Object> {
+                name: z.name,
+                default_value: untranslate(z.default_value),
+                modifiers: z.modifiers,
+                r#type: z.r#type,
+            })
+        }
+        TranslatedObjectChild::ObjectAssignment(z) => {
+            ObjectChild::ObjectAssignment(ObjectAssignmentChild {
+                name: z.name,
+                value: untranslate(z.value),
+            })
+        }
+        TranslatedObjectChild::Object(z) => ObjectChild::Object(untranslate(z)),
+        TranslatedObjectChild::Enum(z) => ObjectChild::Enum(EnumChild {
+            name: z.name,
+            values: z.values.take(),
+        }),
+    }
+}
+
 pub fn untranslate(object: TranslatedObjectRef) -> Object {
     let taken: TranslatedObject = take(&mut *object.borrow_mut());
     Object {
@@ -164,39 +198,7 @@ pub fn untranslate(object: TranslatedObjectRef) -> Object {
         children: taken
             .children
             .into_iter()
-            .map(|child| match child {
-                TranslatedObjectChild::Abstract(z) => ObjectChild::Abstract(z),
-                TranslatedObjectChild::Assignment(z) => ObjectChild::Assignment(z),
-                TranslatedObjectChild::Function(z) => ObjectChild::Function(z),
-                TranslatedObjectChild::Property(z) => ObjectChild::Property(z),
-                TranslatedObjectChild::Signal(z) => ObjectChild::Signal(z),
-
-                TranslatedObjectChild::Component(z) => {
-                    ObjectChild::Component(ComponentDefinition {
-                        name: z.name,
-                        object: untranslate(z.value),
-                    })
-                }
-                TranslatedObjectChild::ObjectProperty(z) => {
-                    ObjectChild::ObjectProperty(PropertyChild::<Object> {
-                        name: z.name,
-                        default_value: untranslate(z.default_value),
-                        modifiers: z.modifiers,
-                        r#type: z.r#type,
-                    })
-                }
-                TranslatedObjectChild::ObjectAssignment(z) => {
-                    ObjectChild::ObjectAssignment(ObjectAssignmentChild {
-                        name: z.name,
-                        value: untranslate(z.value),
-                    })
-                }
-                TranslatedObjectChild::Object(z) => ObjectChild::Object(untranslate(z)),
-                TranslatedObjectChild::Enum(z) => ObjectChild::Enum(EnumChild {
-                    name: z.name,
-                    values: z.values.take(),
-                }),
-            })
+            .map(untranslate_object_child)
             .collect(),
     }
 }

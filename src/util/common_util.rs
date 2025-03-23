@@ -1,6 +1,6 @@
 use std::{fs::read_to_string, path::Path};
 
-use anyhow::Result;
+use anyhow::{Error, Result};
 
 use crate::{
     hashtab::HashTab,
@@ -11,7 +11,7 @@ use crate::{
             self,
             hash_extension::QMLHashRemapper,
             lexer::{Lexer, TokenType},
-            parser::TreeElement,
+            parser::{Object, TreeElement},
             slot_extensions::QMLSlotRemapper,
         },
     },
@@ -72,4 +72,12 @@ pub fn parse_qml(
 pub fn parse_qml_from_chain(tokens: Vec<TokenType>) -> Result<Vec<TreeElement>> {
     let mut parser = qml::parser::Parser::new(Box::new(tokens.into_iter()));
     parser.parse()
+}
+
+pub fn parse_qml_into_simple_object(tokens: Vec<TokenType>) -> Result<Object> {
+    let data = parse_qml_from_chain(tokens)?.pop().unwrap();
+    match data {
+        TreeElement::Object(o) => Ok(o),
+        _ => Err(Error::msg("Invalid token stream for object recreation!")),
+    }
 }

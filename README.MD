@@ -259,9 +259,9 @@ Updates the cursor to after the renamed element.
 This statement can only be used within the direct scope of the `AFFECT` block (i.e. Not in a `SLOT` or `TRAVERSE` block).
 It adds an import to the top of the QML file.
 
-#### `REBUILD <property>`
+#### `REBUILD <property>` / `REDEFINE <property>`
 
-This statement is only valid for JS functions, non-object assignments and non-object properties. It rebuilds the token stream the value consists of.
+This statement is only valid for JS functions, object and non-object assignments, object and non-object properties and objects themselves. It rebuilds the token stream the value consists of.
 It's a block statement, so you need to end the `REBUILD` block with `END REBUILD`.
 The rebuild block essentially defines its own separate language, described below.
 
@@ -271,6 +271,30 @@ Within the `REBUILD` block, another cursor is created. The commands within it mo
 > QML token streams can either be provided by enclosing them in curly braces: `{ qmlCodeGoesHere }` or, in case of non-valid QML blocks: `STREAM <ending_token> qmlCodeGoesHere <ending_token>`
 > Example:
 > `STREAM / if(a) { /`
+
+The difference between `REBUILD` and `REDEFINE` is: `REDEFINE` lets you change the way the property is defined, as well as insert / remove additional objects, whereas `REBUILD` makes that impossible.
+
+Example - for this QML tree when rebuilding / redefining `a`:
+
+```qml
+Object {
+    a: ObjectA {
+        text: "bbb"
+    }
+}
+```
+
+The stream would consist of the following following for `REBUILD`:
+
+```
+Identifier("ObjectA") Symbol('{') Identifier("text")...
+```
+
+Whereas for `REDEFINE`:
+
+```
+Identifier("a") Symbol(':') Identifier("ObjectA") Symbol('{') Identifier("text")...
+```
 
 
 ##### `INSERT ARGUMENT <name> AT <position>`
