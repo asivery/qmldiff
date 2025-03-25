@@ -390,6 +390,7 @@ fn find_substream_in_stream(
     haystack: &Vec<TokenType>,
     needle: &Vec<TokenType>,
     mut start: usize,
+    glob_whitespace_before: bool,
 ) -> Option<(usize, usize)> {
     let haystack_len = haystack.len();
     let needle_len = needle.len();
@@ -400,10 +401,12 @@ fn find_substream_in_stream(
     'main: while start < haystack_len {
         let mut haystack_offset = 0usize;
         // Greedily extend our haystack offset to glob as much as possible
-        while (start + haystack_offset) < haystack_len
-            && is_whitespace(&haystack[start + haystack_offset])
-        {
-            haystack_offset += 1;
+        if glob_whitespace_before {
+            while (start + haystack_offset) < haystack_len
+                && is_whitespace(&haystack[start + haystack_offset])
+            {
+                haystack_offset += 1;
+            }
         }
         if start + haystack_offset >= haystack_len {
             return None;
@@ -415,22 +418,23 @@ fn find_substream_in_stream(
 
         let mut total_len = haystack_offset;
         let mut needle_offset = needle_initial_offset;
-        while needle_offset < needle_len {
-            while needle_offset < needle_len && is_whitespace(&needle[needle_offset]) {
+        let mut needle_i = 0;
+        while (needle_offset + needle_i) < needle_len {
+            while (needle_i + needle_offset) < needle_len && is_whitespace(&needle[needle_i + needle_offset]) {
                 needle_offset += 1;
             }
             while (needle_offset + start + haystack_offset < haystack_len)
-                && is_whitespace(&haystack[needle_offset + start + haystack_offset])
+                && is_whitespace(&haystack[needle_i + start + haystack_offset])
             {
                 haystack_offset += 1;
                 total_len += 1;
             }
-            if haystack[needle_offset + start + haystack_offset] != needle[needle_offset] {
-                start += needle_offset + haystack_offset;
+            if haystack[needle_i + start + haystack_offset] != needle[needle_i + needle_offset] {
+                start += needle_i + haystack_offset;
                 continue 'main;
             }
             total_len += 1;
-            needle_offset += 1;
+            needle_i += 1;
         }
         return Some((start, total_len));
     }
@@ -516,7 +520,7 @@ fn execute_rebuild_steps(
                 LocateRebuildActionSelector::Stream(stream) => {
                     let current_position = if position == usize::MAX { 0 } else { position };
                     let (new_base_pos, length) =
-                        match find_substream_in_stream(&main_body_stream, stream, current_position)
+                        match find_substream_in_stream(&main_body_stream, stream, current_position, true)
                         {
                             Some(n) => n,
                             None => {
@@ -540,7 +544,7 @@ fn execute_rebuild_steps(
                         unambiguous_position!();
                         if let Some(ref located) = located {
                             if let Some((position_located, length_located)) =
-                                find_substream_in_stream(&main_body_stream, located, position)
+                                find_substream_in_stream(&main_body_stream, located, position, true)
                             {
                                 if position_located == position {
                                     // We're OK - remove
@@ -564,7 +568,7 @@ fn execute_rebuild_steps(
                         // Make sure the cursor is located where 'literal' starts at
                         unambiguous_position!();
                         if let Some((found_position, length)) =
-                            find_substream_in_stream(&main_body_stream, literal, position)
+                            find_substream_in_stream(&main_body_stream, literal, position, true)
                         {
                             if found_position == position {
                                 // We're OK - remove
@@ -587,7 +591,7 @@ fn execute_rebuild_steps(
                     RemoveRebuildAction::UntilStream(until_stream) => {
                         located = Some(until_stream.clone());
                         if let Some((until_stream_location, _)) =
-                            find_substream_in_stream(&main_body_stream, until_stream, position)
+                            find_substream_in_stream(&main_body_stream, until_stream, position, true)
                         {
                             main_body_stream.splice(position..until_stream_location, vec![]);
                         } else {
@@ -615,7 +619,7 @@ fn execute_rebuild_steps(
                 };
                 let mut until_position = match &replace.until_stream {
                     Some(stream) => {
-                        match find_substream_in_stream(&main_body_stream, stream, position) {
+                        match find_substream_in_stream(&main_body_stream, stream, position, false) {
                             Some((pos, _len)) => pos,
                             None => {
                                 return Err(Error::msg(format!(
@@ -631,7 +635,7 @@ fn execute_rebuild_steps(
                 let mut position = position;
                 while position < until_position {
                     let (found_index, source_length) =
-                        match find_substream_in_stream(&main_body_stream, &source_stream, position)
+                        match find_substream_in_stream(&main_body_stream, &source_stream, position, false)
                         {
                             None => break,
                             Some(n) => n,
@@ -642,6 +646,7 @@ fn execute_rebuild_steps(
                         position..position + source_length,
                         replace.new_contents.clone(),
                     );
+                    position += replace.new_contents.len() - source_length + 1;
                     counter += 1;
                 }
                 if counter == 0 {
