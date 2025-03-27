@@ -149,6 +149,27 @@ struct RootReference {
 }
 
 fn find_first_matching_child(root: &TreeRoot, tree: &Vec<NodeSelector>) -> Result<usize> {
+    macro_rules! make_tree_return_i {
+        ($i: expr, $obj: expr, $name: expr) => {
+            if !locate_in_tree(
+                vec![TreeRoot::Object(Rc::new(RefCell::new(TranslatedObject {
+                    name: String::default(),
+                    full_name: String::default(),
+                    children: vec![TranslatedObjectChild::ObjectAssignment(
+                        TranslatedObjectAssignmentChild {
+                            name: $name.clone(),
+                            value: $obj.clone(),
+                        },
+                    )],
+                })))],
+                tree,
+            )
+            .is_empty()
+            {
+                return Ok($i);
+            }
+        };
+    }
     match root {
         TreeRoot::Object(root) => {
             for (i, child) in root.borrow().children.iter().enumerate() {
@@ -179,23 +200,10 @@ fn find_first_matching_child(root: &TreeRoot, tree: &Vec<NodeSelector>) -> Resul
                     }
                     TranslatedObjectChild::Component(obj)
                     | TranslatedObjectChild::ObjectAssignment(obj) => {
-                        if !locate_in_tree(
-                            vec![TreeRoot::Object(Rc::new(RefCell::new(TranslatedObject {
-                                name: String::default(),
-                                full_name: String::default(),
-                                children: vec![TranslatedObjectChild::ObjectAssignment(
-                                    TranslatedObjectAssignmentChild {
-                                        name: obj.name.clone(),
-                                        value: obj.value.clone(),
-                                    },
-                                )],
-                            })))],
-                            tree,
-                        )
-                        .is_empty()
-                        {
-                            return Ok(i);
-                        }
+                        make_tree_return_i!(i, obj.value, obj.name);
+                    }
+                    TranslatedObjectChild::ObjectProperty(obj) => {
+                        make_tree_return_i!(i, obj.default_value, obj.name);
                     }
                     _ => {}
                 }
