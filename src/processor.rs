@@ -401,11 +401,8 @@ fn find_substream_in_stream(
     glob_whitespace_before: bool,
 ) -> Option<(usize, usize)> {
     let haystack_len = haystack.len();
+    let needle = needle.iter().filter(|e| !is_whitespace(e)).collect::<Vec<_>>();
     let needle_len = needle.len();
-    let mut needle_initial_offset = 0usize;
-    while needle_initial_offset < needle_len && is_whitespace(&needle[needle_initial_offset]) {
-        needle_initial_offset += 1;
-    }
     'main: while start < haystack_len {
         let mut haystack_offset = 0usize;
         // Greedily extend our haystack offset to glob as much as possible
@@ -419,26 +416,22 @@ fn find_substream_in_stream(
         if start + haystack_offset >= haystack_len {
             return None;
         }
-        if haystack[start + haystack_offset] != needle[needle_initial_offset] {
+        if haystack[start + haystack_offset] != *needle[0] {
             start += haystack_offset + 1;
             continue;
         }
 
         let mut total_len = haystack_offset;
-        let mut needle_offset = needle_initial_offset;
         let mut needle_i = 0;
-        while (needle_offset + needle_i) < needle_len {
-            while (needle_i + needle_offset) < needle_len && is_whitespace(&needle[needle_i + needle_offset]) {
-                needle_offset += 1;
-            }
-            while (needle_offset + start + haystack_offset < haystack_len)
+        while needle_i < needle_len && (haystack_offset + needle_i + start) < haystack_len {
+            while (needle_i + start + haystack_offset < haystack_len)
                 && is_whitespace(&haystack[needle_i + start + haystack_offset])
             {
                 haystack_offset += 1;
                 total_len += 1;
             }
-            if haystack[needle_i + start + haystack_offset] != needle[needle_i + needle_offset] {
-                start += needle_i + haystack_offset;
+            if haystack[needle_i + start + haystack_offset] != *needle[needle_i] {
+                start += needle_i + haystack_offset + 1;
                 continue 'main;
             }
             total_len += 1;
