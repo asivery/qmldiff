@@ -245,6 +245,12 @@ This statement can be treated as a combination of the `LOCATE`, `REMOVE` and `IN
 It locates the first child matching the `<node>` selector within the current root, deletes it, then inserts
 the QML code provided at that spot.
 
+#### `REPLICATE <tree>`
+
+The `REPLICATE` statement finds the node pointed to by `tree` in the current root, then clones it into a new fake-root that's outside of the currently edited file's tree. It then immediately `TRAVERSE`s that new root. This makes it possible to use any statements used within `TRAVERSE` blocks to freely edit the object.
+
+Needs to be termiated with `END REPLICATE` - that exits the fake root and merges it back into the tree, at the position pointed to by the current root's cursor.
+
 #### `RENAME <node> TO <id>`
 
 Renames the first child matching the `<node>` selector to `<id>`. It can only be used for named objects declarations (and not objects!).

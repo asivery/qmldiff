@@ -78,7 +78,6 @@ fn update_hashtab(hashtab: &mut HashTab, qml_obj: &Object) {
                 include!(&prop.name);
                 update_hashtab(hashtab, &prop.default_value);
             }
-            ObjectChild::Abstract(_) => {}
         }
     }
 }

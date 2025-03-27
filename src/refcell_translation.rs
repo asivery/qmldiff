@@ -2,9 +2,8 @@ use anyhow::{Error, Result};
 
 use crate::parser::qml::emitter::emit_simple_token_stream;
 use crate::parser::qml::parser::{
-    AssignmentChild, AssignmentChildValue, ComponentDefinition, EmitableObjectChild, EnumChild,
-    FunctionChild, Object, ObjectAssignmentChild, ObjectChild, PropertyChild, QMLTree, SignalChild,
-    TreeElement,
+    AssignmentChild, AssignmentChildValue, ComponentDefinition, EnumChild, FunctionChild, Object,
+    ObjectAssignmentChild, ObjectChild, PropertyChild, QMLTree, SignalChild, TreeElement,
 };
 use std::cell::RefCell;
 use std::mem::take;
@@ -18,11 +17,30 @@ pub struct TranslatedEnumChild {
     pub values: TranslatedEnumChildValues,
 }
 
+impl TranslatedEnumChild {
+    pub fn deep_clone(&self) -> Self {
+        Self {
+            name: self.name.clone(),
+            values: Rc::new(RefCell::new(self.values.borrow().clone())),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct TranslatedObjectAssignmentChild {
     pub name: String,
     pub value: TranslatedObjectRef,
 }
+
+impl TranslatedObjectAssignmentChild {
+    pub fn deep_clone(&self) -> Self {
+        Self {
+            name: self.name.clone(),
+            value: deep_clone_translated_object(&self.value),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub enum TranslatedObjectChild {
     Signal(SignalChild),
@@ -34,10 +52,50 @@ pub enum TranslatedObjectChild {
     Object(TranslatedObjectRef),
     Enum(TranslatedEnumChild),
     Component(TranslatedObjectAssignmentChild),
-    Abstract(Box<dyn EmitableObjectChild>),
+}
+
+impl TranslatedObjectChild {
+    pub fn deep_clone(&self) -> Self {
+        // Objects all have to be deep cloned!
+        match self {
+            Self::Assignment(a) => Self::Assignment(a.clone()),
+            Self::Enum(e) => Self::Enum(e.deep_clone()),
+            Self::Component(c) => Self::Component(c.deep_clone()),
+            Self::Function(f) => Self::Function(f.clone()),
+            Self::Object(o) => Self::Object(deep_clone_translated_object(o)),
+            Self::ObjectAssignment(a) => Self::ObjectAssignment(a.deep_clone()),
+            Self::ObjectProperty(p) => Self::ObjectProperty(deep_clone_property_child(p)),
+            Self::Property(p) => Self::Property(p.clone()),
+            Self::Signal(s) => Self::Signal(s.clone()),
+        }
+    }
 }
 
 pub type TranslatedObjectRef = Rc<RefCell<TranslatedObject>>;
+
+pub fn deep_clone_translated_object(obj: &TranslatedObjectRef) -> TranslatedObjectRef {
+    let instance = obj.borrow();
+    Rc::new(RefCell::new(TranslatedObject {
+        name: instance.name.clone(),
+        children: instance
+            .children
+            .iter()
+            .map(|e| e.deep_clone())
+            .collect::<Vec<_>>(),
+        full_name: instance.full_name.clone(),
+    }))
+}
+
+pub fn deep_clone_property_child(
+    pc: &PropertyChild<TranslatedObjectRef>,
+) -> PropertyChild<TranslatedObjectRef> {
+    PropertyChild {
+        name: pc.name.clone(),
+        default_value: deep_clone_translated_object(&pc.default_value),
+        modifiers: pc.modifiers.clone(),
+        r#type: pc.r#type.clone(),
+    }
+}
 
 #[derive(Debug, Default)]
 pub struct TranslatedObject {
@@ -49,7 +107,6 @@ pub struct TranslatedObject {
 impl<'a> TranslatedObjectChild {
     pub fn get_name(&'a self) -> Option<&'a String> {
         match self {
-            TranslatedObjectChild::Abstract(_) => None,
             TranslatedObjectChild::Assignment(assi) => Some(&assi.name),
             TranslatedObjectChild::ObjectAssignment(assi) => Some(&assi.name),
             TranslatedObjectChild::Component(cmp) => Some(&cmp.name),
@@ -64,7 +121,6 @@ impl<'a> TranslatedObjectChild {
 
     pub fn get_str_value(&'a self) -> Option<String> {
         match self {
-            TranslatedObjectChild::Abstract(_) => None,
             TranslatedObjectChild::Assignment(assigned) => match &assigned.value {
                 AssignmentChildValue::Other(generic_value) => {
                     Some(emit_simple_token_stream(generic_value))
@@ -93,7 +149,6 @@ impl<'a> TranslatedObjectChild {
             };
         }
         match self {
-            TranslatedObjectChild::Abstract(_) => return error!(),
             TranslatedObjectChild::Assignment(assigned) => assigned.name = name,
             TranslatedObjectChild::Component(cmp) => cmp.name = name,
             TranslatedObjectChild::Function(func) => func.name = name,
@@ -110,7 +165,6 @@ impl<'a> TranslatedObjectChild {
 
 pub fn translate_object_child(child: ObjectChild) -> TranslatedObjectChild {
     match child {
-        ObjectChild::Abstract(z) => TranslatedObjectChild::Abstract(z),
         ObjectChild::Assignment(z) => TranslatedObjectChild::Assignment(z),
         ObjectChild::Function(z) => TranslatedObjectChild::Function(z),
         ObjectChild::Property(z) => TranslatedObjectChild::Property(z),
@@ -158,7 +212,6 @@ pub fn translate(object: Object) -> TranslatedObjectRef {
 
 pub fn untranslate_object_child(child: TranslatedObjectChild) -> ObjectChild {
     match child {
-        TranslatedObjectChild::Abstract(z) => ObjectChild::Abstract(z),
         TranslatedObjectChild::Assignment(z) => ObjectChild::Assignment(z),
         TranslatedObjectChild::Function(z) => ObjectChild::Function(z),
         TranslatedObjectChild::Property(z) => ObjectChild::Property(z),

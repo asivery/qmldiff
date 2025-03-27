@@ -5,7 +5,7 @@ use std::{
 };
 
 use super::{
-    emitter::{emit_simple_token_stream, Line},
+    emitter::emit_simple_token_stream,
     lexer::{Keyword, TokenType},
 };
 
@@ -18,47 +18,47 @@ pub struct Import {
     pub alias: Option<String>,
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct SignalChild {
     pub name: String,
     pub arguments: Option<Vec<TokenType>>,
 }
 
-#[derive(Debug, PartialEq, Eq)]
-pub struct PropertyChild<T> {
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct PropertyChild<T: Clone> {
     pub name: String,
     pub default_value: T,
     pub modifiers: Vec<Keyword>,
     pub r#type: Option<String>,
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum AssignmentChildValue {
     Object(Object),
     // List(Vec<AssignmentChildValue>),
     Other(Vec<TokenType>),
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct AssignmentChild {
     pub name: String,
     pub value: AssignmentChildValue,
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct ObjectAssignmentChild {
     pub name: String,
     pub value: Object,
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct FunctionChild {
     pub name: String,
     pub arguments: Vec<TokenType>,
     pub body: Vec<TokenType>,
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct EnumChild {
     pub name: String,
     pub values: Vec<(String, Option<u64>)>,
@@ -69,13 +69,13 @@ pub struct Pragma {
     pub pragma: String,
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct ComponentDefinition {
     pub name: String,
     pub object: Object,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum ObjectChild {
     Signal(SignalChild),
     Property(PropertyChild<Option<AssignmentChildValue>>),
@@ -86,13 +86,11 @@ pub enum ObjectChild {
     Object(Object),
     Enum(EnumChild),
     Component(ComponentDefinition),
-    Abstract(Box<dyn EmitableObjectChild>),
 }
 
 impl<'a> ObjectChild {
     pub fn get_name(&'a self) -> Option<&'a String> {
         match self {
-            ObjectChild::Abstract(_) => None,
             ObjectChild::Assignment(assi) => Some(&assi.name),
             ObjectChild::ObjectAssignment(assi) => Some(&assi.name),
             ObjectChild::Component(cmp) => Some(&cmp.name),
@@ -107,7 +105,6 @@ impl<'a> ObjectChild {
 
     pub fn get_str_value(&'a self) -> Option<String> {
         match self {
-            ObjectChild::Abstract(_) => None,
             ObjectChild::Assignment(assigned) => match &assigned.value {
                 AssignmentChildValue::Other(generic_value) => {
                     Some(emit_simple_token_stream(generic_value))
@@ -131,16 +128,6 @@ impl<'a> ObjectChild {
     }
 }
 
-pub trait EmitableObjectChild {
-    fn emit(&self, indent: usize) -> Vec<Line>;
-}
-
-impl std::fmt::Debug for dyn EmitableObjectChild {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("AbstractEmitable").finish()
-    }
-}
-
 impl PartialEq for ObjectChild {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
@@ -160,7 +147,7 @@ impl PartialEq for ObjectChild {
 // Implement Eq for ObjectChild as well, since PartialEq is implemented
 impl Eq for ObjectChild {}
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Object {
     pub name: String,
     pub children: Vec<ObjectChild>,

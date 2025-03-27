@@ -137,6 +137,7 @@ pub enum FileChangeAction {
     AllowMultiple,
     AddImport(ImportAction),
     Rebuild(RebuildAction),
+    Replicate(NodeTree),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -399,6 +400,7 @@ impl Parser {
                     | Keyword::At
                     | Keyword::Located
                     | Keyword::Rebuild
+                    | Keyword::Replicate
                     | Keyword::Redefine => {
                         return error_received_expected!(kw, "Rebuild directive keyword");
                     }
@@ -759,6 +761,7 @@ impl Parser {
                     }
                 }
                 Keyword::Traverse => Ok(FileChangeAction::Traverse(self.read_tree()?)),
+                Keyword::Replicate => Ok(FileChangeAction::Replicate(self.read_tree()?)),
             }
         } else {
             error_received_expected!(next, "Directive keyword")
@@ -830,6 +833,12 @@ impl Parser {
 
                             TokenType::Keyword(Keyword::Traverse) => {
                                 current_instructions.push(FileChangeAction::End(Keyword::Traverse));
+                                continue;
+                            }
+
+                            TokenType::Keyword(Keyword::Replicate) => {
+                                current_instructions
+                                    .push(FileChangeAction::End(Keyword::Replicate));
                                 continue;
                             }
 

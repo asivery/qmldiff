@@ -158,7 +158,6 @@ fn _emit_object_to_token_stream(object: &Object, stream: &mut Vec<TokenType>, on
     }
     for child in &object.children {
         match child {
-            ObjectChild::Abstract(_) => panic!("Cannot emit abstract to token stream!"),
             ObjectChild::ObjectAssignment(assignment) => {
                 id!(assignment.name.clone());
                 add!(TokenType::Symbol(':'));
@@ -250,7 +249,7 @@ pub fn emit_object_to_token_stream(object: &Object, only_body: bool) -> Vec<Toke
     stream
 }
 
-fn emit_property_prologue<T>(prop: &PropertyChild<T>) -> String {
+fn emit_property_prologue<T: Clone>(prop: &PropertyChild<T>) -> String {
     let modifiers: String = prop
         .modifiers
         .iter()
@@ -273,7 +272,6 @@ pub fn emit_object(object: &Object, indent: usize) -> Vec<Line> {
 
     for child in &object.children {
         match child {
-            ObjectChild::Abstract(r#abstract) => lines.extend(r#abstract.emit(indent)),
             ObjectChild::ObjectAssignment(assignment) => {
                 let value_emited = emit_object(&assignment.value, indent);
                 let new_first_line = Line {

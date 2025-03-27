@@ -27,6 +27,12 @@ use anyhow::{Error, Result};
 
 use crate::parser::diff::parser::Change;
 
+macro_rules! traverse_no_raw_children {
+    () => {
+        unreachable!("TRAVERSE does not allow raw children as roots!")
+    };
+}
+
 pub fn find_and_process(
     file_name: &str,
     qml: &mut TranslatedTree,
@@ -92,16 +98,25 @@ fn does_match(
 enum TreeRoot {
     Object(TranslatedObjectRef),
     Enum(TranslatedEnumChild),
+    Child {
+        parent: TranslatedObjectRef,
+        child_index: usize,
+    },
 }
 
-fn locate_in_tree(roots: Vec<TreeRoot>, tree: &NodeTree) -> Vec<TreeRoot> {
+fn locate_in_tree(
+    roots: Vec<TreeRoot>,
+    tree: &NodeTree,
+    force_raw_children: bool,
+) -> Vec<TreeRoot> {
     let mut potential_roots = roots; // Start with the initial root
     for sel in tree {
         let mut swap_root = Vec::new();
-        for r in &potential_roots {
+        for (i, r) in potential_roots.iter().enumerate() {
+            let is_last = i == potential_roots.len() - 1;
             // Borrow each potential root mutably for children traversal
             if let TreeRoot::Object(r) = r {
-                for child in &r.borrow().children {
+                for (i, child) in r.borrow().children.iter().enumerate() {
                     let child_object = match child {
                         TranslatedObjectChild::Object(obj) => {
                             Some((None, TreeRoot::Object(obj.clone())))
@@ -116,6 +131,13 @@ fn locate_in_tree(roots: Vec<TreeRoot>, tree: &NodeTree) -> Vec<TreeRoot> {
                         TranslatedObjectChild::Enum(enu) => {
                             Some((Some(&enu.name), TreeRoot::Enum(enu.clone())))
                         }
+                        _ if force_raw_children => Some((
+                            child.get_name(),
+                            TreeRoot::Child {
+                                child_index: i,
+                                parent: r.clone(),
+                            },
+                        )),
                         _ => None,
                     };
 
@@ -123,12 +145,37 @@ fn locate_in_tree(roots: Vec<TreeRoot>, tree: &NodeTree) -> Vec<TreeRoot> {
                         match &object {
                             TreeRoot::Object(obj) => {
                                 if does_match(&obj.borrow(), sel, name) {
-                                    swap_root.push(object); // Collect the matched child object
+                                    // Collect the matched child object
+                                    if force_raw_children && is_last {
+                                        swap_root.push(TreeRoot::Child {
+                                            parent: r.clone(),
+                                            child_index: i,
+                                        });
+                                    } else {
+                                        swap_root.push(object);
+                                    }
                                 }
                             }
                             TreeRoot::Enum(r#enum) => {
                                 if sel.is_simple() && sel.object_name == r#enum.name {
-                                    swap_root.push(object);
+                                    if force_raw_children && is_last {
+                                        swap_root.push(TreeRoot::Child {
+                                            parent: r.clone(),
+                                            child_index: i,
+                                        });
+                                    } else {
+                                        swap_root.push(object);
+                                    }
+                                }
+                            }
+                            TreeRoot::Child {
+                                parent: _,
+                                child_index: _,
+                            } => {
+                                if let Some(name) = name {
+                                    if sel.is_simple() && sel.object_name == *name {
+                                        swap_root.push(object);
+                                    }
                                 }
                             }
                         }
@@ -146,6 +193,14 @@ fn locate_in_tree(roots: Vec<TreeRoot>, tree: &NodeTree) -> Vec<TreeRoot> {
 struct RootReference {
     pub root: Vec<TreeRoot>,
     pub cursor: Option<usize>,
+    pub is_replicating: bool,
+}
+
+fn tree_to_string(tree: &NodeTree) -> String {
+    tree.iter()
+        .map(|e| e.to_string())
+        .collect::<Vec<String>>()
+        .join(" > ")
 }
 
 fn find_first_matching_child(root: &TreeRoot, tree: &Vec<NodeSelector>) -> Result<usize> {
@@ -163,6 +218,7 @@ fn find_first_matching_child(root: &TreeRoot, tree: &Vec<NodeSelector>) -> Resul
                     )],
                 })))],
                 tree,
+                false,
             )
             .is_empty()
             {
@@ -192,6 +248,7 @@ fn find_first_matching_child(root: &TreeRoot, tree: &Vec<NodeSelector>) -> Resul
                                 children: vec![TranslatedObjectChild::Object(obj.clone())],
                             })))],
                             tree,
+                            false,
                         )
                         .is_empty()
                         {
@@ -280,6 +337,14 @@ fn insert_into_root(
                         .borrow_mut()
                         .extend_from_slice(&enum_child.values);
                 }
+            }
+            TreeRoot::Child {
+                parent: _,
+                child_index: _,
+            } => {
+                return Err(Error::msg(
+                    "Cannot assign object to a non-object object child!",
+                ));
             }
         }
     } else {
@@ -401,7 +466,10 @@ fn find_substream_in_stream(
     glob_whitespace_before: bool,
 ) -> Option<(usize, usize)> {
     let haystack_len = haystack.len();
-    let needle = needle.iter().filter(|e| !is_whitespace(e)).collect::<Vec<_>>();
+    let needle = needle
+        .iter()
+        .filter(|e| !is_whitespace(e))
+        .collect::<Vec<_>>();
     let needle_len = needle.len();
     'main: while start < haystack_len {
         let mut haystack_offset = 0usize;
@@ -520,17 +588,20 @@ fn execute_rebuild_steps(
                 }
                 LocateRebuildActionSelector::Stream(stream) => {
                     let current_position = if position == usize::MAX { 0 } else { position };
-                    let (new_base_pos, length) =
-                        match find_substream_in_stream(&main_body_stream, stream, current_position, true)
-                        {
-                            Some(n) => n,
-                            None => {
-                                return Err(Error::msg(format!(
-                                    "Cannot locate the substream [{:?}] in [{:?}]",
-                                    stream, &main_body_stream
-                                )));
-                            }
-                        };
+                    let (new_base_pos, length) = match find_substream_in_stream(
+                        &main_body_stream,
+                        stream,
+                        current_position,
+                        true,
+                    ) {
+                        Some(n) => n,
+                        None => {
+                            return Err(Error::msg(format!(
+                                "Cannot locate the substream [{:?}] in [{:?}]",
+                                stream, &main_body_stream
+                            )));
+                        }
+                    };
                     located = Some(stream.clone());
                     match locate.location {
                         Location::After => position = new_base_pos + length,
@@ -591,9 +662,12 @@ fn execute_rebuild_steps(
                     }
                     RemoveRebuildAction::UntilStream(until_stream) => {
                         located = Some(until_stream.clone());
-                        if let Some((until_stream_location, _)) =
-                            find_substream_in_stream(&main_body_stream, until_stream, position, true)
-                        {
+                        if let Some((until_stream_location, _)) = find_substream_in_stream(
+                            &main_body_stream,
+                            until_stream,
+                            position,
+                            true,
+                        ) {
                             main_body_stream.splice(position..until_stream_location, vec![]);
                         } else {
                             return Err(Error::msg(
@@ -635,12 +709,15 @@ fn execute_rebuild_steps(
                 let mut counter = 0;
                 let mut position = position;
                 while position < until_position {
-                    let (found_index, source_length) =
-                        match find_substream_in_stream(&main_body_stream, &source_stream, position, false)
-                        {
-                            None => break,
-                            Some(n) => n,
-                        };
+                    let (found_index, source_length) = match find_substream_in_stream(
+                        &main_body_stream,
+                        &source_stream,
+                        position,
+                        false,
+                    ) {
+                        None => break,
+                        Some(n) => n,
+                    };
                     until_position -= source_length;
                     position = found_index;
                     main_body_stream.splice(
@@ -866,6 +943,7 @@ pub fn process(absolute_root: &mut TranslatedTree, diff: &Change, slots: &mut Sl
     let mut current_root = RootReference {
         root: vec![TreeRoot::Object(absolute_root.root.clone())],
         cursor: None,
+        is_replicating: false,
     }; // Start with root as the current root
 
     macro_rules! unambiguous_root {
@@ -895,7 +973,7 @@ pub fn process(absolute_root: &mut TranslatedTree, diff: &Change, slots: &mut Sl
 
     for change in &diff.changes {
         match change {
-            FileChangeAction::End(Keyword::Traverse) => {
+            FileChangeAction::End(Keyword::Traverse) if !current_root.is_replicating => {
                 // Pop the last object from the stack to return to the previous root
                 if let Some(root) = root_stack.pop() {
                     current_root = root;
@@ -903,19 +981,74 @@ pub fn process(absolute_root: &mut TranslatedTree, diff: &Change, slots: &mut Sl
                     return Err(Error::msg("Cannot END TRAVERSE - end of scope!"));
                 }
             }
+            FileChangeAction::End(Keyword::Replicate) if current_root.is_replicating => {
+                if let Some(previous_root) = root_stack.pop() {
+                    // Grab the children
+                    let children_to_merge = {
+                        let fake_root = unambiguous_root!();
+                        match fake_root {
+                            TreeRoot::Object(obj) => take(&mut obj.borrow_mut().children),
+                            _ => unreachable!("Fake root is created as object, always!"),
+                        }
+                    };
+                    current_root = previous_root;
+                    // Merge
+                    let (root, cursor) = unambiguous_root_cursor_set!();
+                    match root {
+                        TreeRoot::Object(obj) => {
+                            obj.borrow_mut()
+                                .children
+                                .splice(cursor..cursor, children_to_merge);
+                        }
+                        _ => {
+                            return Err(Error::msg(
+                                "Cannot END REPLICATE - the old parent is not an object!",
+                            ));
+                        }
+                    }
+                } else {
+                    return Err(Error::msg("Cannot END REPLICATE - end of scope!"));
+                }
+            }
             FileChangeAction::End(_) => {
-                return Err(Error::msg("END TRAVERSE first!"));
+                return Err(Error::msg("END TRAVERSE / END REPLICATE first!"));
+            }
+            FileChangeAction::Replicate(tree) => {
+                let object = locate_in_tree(current_root.root.clone(), tree, true);
+                if object.len() != 1 {
+                    return Err(Error::msg(format!(
+                        "Cannot locate exactly one elemnt for replication: {}",
+                        tree_to_string(tree)
+                    )));
+                }
+
+                // Push the current root onto the stack and create a new root that will consist of the replicated object
+
+                root_stack.push(current_root);
+                let element = match object.first().unwrap() {
+                    TreeRoot::Child {
+                        parent,
+                        child_index,
+                    } => parent.borrow().children[*child_index].deep_clone(),
+                    _ => unreachable!("force_all_children = true"),
+                };
+                current_root = RootReference {
+                    root: vec![TreeRoot::Object(Rc::new(RefCell::new(TranslatedObject {
+                        name: String::default(),
+                        full_name: String::default(),
+                        children: vec![element],
+                    })))],
+                    cursor: None,
+                    is_replicating: true,
+                }
             }
             FileChangeAction::Traverse(tree) => {
                 // Attempt to locate the child object in the current root
-                let object = locate_in_tree(current_root.root.clone(), tree);
+                let object = locate_in_tree(current_root.root.clone(), tree, false);
                 if object.is_empty() {
                     return Err(Error::msg(format!(
                         "Cannot locate element in tree: {}",
-                        tree.iter()
-                            .map(|e| e.to_string())
-                            .collect::<Vec<String>>()
-                            .join(" > ")
+                        tree_to_string(tree)
                     )));
                 }
 
@@ -924,6 +1057,7 @@ pub fn process(absolute_root: &mut TranslatedTree, diff: &Change, slots: &mut Sl
                 current_root = RootReference {
                     root: object,
                     cursor: None,
+                    is_replicating: false,
                 };
             }
             FileChangeAction::Assert(tree_selector) => {
@@ -948,9 +1082,13 @@ pub fn process(absolute_root: &mut TranslatedTree, diff: &Change, slots: &mut Sl
                                     }
                                 }
                             }
+                            TreeRoot::Child {
+                                parent: _,
+                                child_index: _,
+                            } => traverse_no_raw_children!(),
                         }
                     }
-                    !locate_in_tree(vec![e.clone()], tree_selector).is_empty()
+                    !locate_in_tree(vec![e.clone()], tree_selector, false).is_empty()
                 });
                 if current_root.root.is_empty() {
                     return Err(Error::msg("ASSERTed all objects out of existence"));
@@ -980,6 +1118,10 @@ pub fn process(absolute_root: &mut TranslatedTree, diff: &Change, slots: &mut Sl
                         Location::After => match root {
                             TreeRoot::Enum(r#enum) => r#enum.values.borrow().len(),
                             TreeRoot::Object(root) => root.borrow().children.len(),
+                            TreeRoot::Child {
+                                parent: _,
+                                child_index: _,
+                            } => traverse_no_raw_children!(),
                         },
                     },
                     LocationSelector::Tree(tree) => {
@@ -1002,6 +1144,10 @@ pub fn process(absolute_root: &mut TranslatedTree, diff: &Change, slots: &mut Sl
                     TreeRoot::Enum(r#enum) => {
                         r#enum.values.borrow_mut().remove(element_idx);
                     }
+                    TreeRoot::Child {
+                        parent: _,
+                        child_index: _,
+                    } => traverse_no_raw_children!(),
                 };
                 insert_into_root(
                     &mut element_idx,
@@ -1029,6 +1175,10 @@ pub fn process(absolute_root: &mut TranslatedTree, diff: &Change, slots: &mut Sl
                     TreeRoot::Object(obj) => {
                         obj.borrow_mut().children[element_idx].set_name(rename.name_to.clone())?;
                     }
+                    TreeRoot::Child {
+                        parent: _,
+                        child_index: _,
+                    } => traverse_no_raw_children!(),
                 }
                 current_root.cursor = Some(element_idx + 1);
             }
@@ -1065,6 +1215,10 @@ pub fn process(absolute_root: &mut TranslatedTree, diff: &Change, slots: &mut Sl
                             .borrow_mut()
                             .retain(|e| e.0 != selector.object_name);
                     }
+                    TreeRoot::Child {
+                        parent: _,
+                        child_index: _,
+                    } => traverse_no_raw_children!(),
                 }
             }
             FileChangeAction::AddImport(import) => {
@@ -1098,6 +1252,10 @@ pub fn process(absolute_root: &mut TranslatedTree, diff: &Change, slots: &mut Sl
                             rebuild_child(rebuild, child_reference)?;
                         }
                     }
+                    TreeRoot::Child {
+                        parent: _,
+                        child_index: _,
+                    } => traverse_no_raw_children!(),
                 };
             }
             FileChangeAction::AllowMultiple => {
