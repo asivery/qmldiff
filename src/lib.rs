@@ -130,23 +130,32 @@ extern "C" fn qmldiff_build_change_files(root_dir: *const c_char) -> i32 {
     load_hashtab(&root_dir);
 
     if let Ok(dir) = std::fs::read_dir(&root_dir) {
+        let mut files = vec![];
         for file in dir.flatten() {
-            let name: String = file.file_name().into_string().unwrap();
-            if name.ends_with(".qmd") {
-                eprintln!("[qmldiff]: Loading file {}", &name);
-                match load_diff_file(
-                    Some(root_dir.clone()),
-                    file.path(),
-                    &HASHTAB.lock().unwrap(),
-                ) {
-                    Err(problem) => {
-                        eprintln!("[qmldiff]: Failed to load file {}: {:?}", &name, problem)
-                    }
-                    Ok(mut contents) => {
-                        slots.update_slots(&mut contents);
-                        all_changes.extend(contents);
-                        loaded_files += 1;
-                    }
+            let path: String = file.path().to_string_lossy().to_string();
+            if path.ends_with(".qmd") {
+                files.push(path);
+            }
+        }
+        files.sort();
+        for file in &files {
+            let fname_start = match file.rfind("/") {
+                Some(e) => e + 1,
+                None => 0
+            };
+            eprintln!("[qmldiff]: Loading file {}", &file[fname_start..]);
+            match load_diff_file(
+                Some(root_dir.clone()),
+                file,
+                &HASHTAB.lock().unwrap(),
+            ) {
+                Err(problem) => {
+                    eprintln!("[qmldiff]: Failed to load file {}: {:?}", file, problem)
+                }
+                Ok(mut contents) => {
+                    slots.update_slots(&mut contents);
+                    all_changes.extend(contents);
+                    loaded_files += 1;
                 }
             }
         }
