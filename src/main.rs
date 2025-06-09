@@ -70,7 +70,8 @@ enum Commands {
     /// Apply the diffs for a given hashtab and QML root path
     ApplyDiffs {
         /// The hashtab to use
-        hashtab: String,
+        #[arg(short, long)]
+        hashtab: Option<String>,
         /// The root path of the QML tree
         qml_root_path: String,
         /// The destination root path
@@ -140,7 +141,9 @@ fn main() {
             clean,
         } => {
             let mut hashtab_value = HashTab::new();
-            merge_hash_file(hashtab, &mut hashtab_value, None).unwrap();
+            if let Some(hashtab) = hashtab {
+                merge_hash_file(hashtab, &mut hashtab_value, None).unwrap();
+            }
             if *clean {
                 // Ignore result
                 {
