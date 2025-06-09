@@ -8,6 +8,8 @@ use hashrules::HashRules;
 use hashtab::{merge_hash_file, serialize_hashtab, HashTab, InvHashTab};
 use slots::Slots;
 
+use crate::util::common_util::filter_out_non_matching_versions;
+
 #[path = "util/cli_util.rs"]
 mod cli_util;
 mod hash;
@@ -45,6 +47,8 @@ enum Commands {
         /// The name of the hashtab to create
         #[arg(default_value = "hashtab")]
         hashtab_name: String,
+        /// The version of the QML environment to encode in hashtab
+        version: Option<String>,
     },
     /// Dump the contents of a hashtab in a human-readable form
     DumpHashtab {
@@ -87,6 +91,8 @@ enum Commands {
         // /// Watch the diff_list for changes
         // #[arg(short, long, action = clap::ArgAction::SetTrue)]
         // watch_for_changes: bool,
+        /// The QML environment version
+        version: Option<String>,
     },
 }
 
@@ -98,6 +104,7 @@ fn main() {
             qml_root_path,
             hashtab_name,
             hashrules_name,
+            version,
         } => {
             let mut hashtab = start_hashmap_build(qml_root_path);
             if let Some(hashrules) = hashrules_name {
@@ -109,12 +116,12 @@ fn main() {
                     HashRules::compile(&std::fs::read_to_string(hashrules).unwrap()).unwrap();
                 rules.process(&mut hashtab);
             }
-            let hashtab_data = serialize_hashtab(&hashtab);
+            let hashtab_data = serialize_hashtab(&hashtab, version.clone());
             std::fs::write(hashtab_name, hashtab_data).unwrap()
         }
         Commands::DumpHashtab { hashtab } => {
             let mut tab = HashTab::new();
-            merge_hash_file(hashtab, &mut tab, None).unwrap();
+            merge_hash_file(hashtab, &mut tab, None, None).unwrap();
             for (i, v) in tab {
                 println!("{} = {}", v, i);
             }
@@ -129,7 +136,7 @@ fn main() {
         } => {
             let mut hashtab_value = HashTab::new();
             let mut inv_hashtab = InvHashTab::new();
-            merge_hash_file(hashtab, &mut hashtab_value, Some(&mut inv_hashtab)).unwrap();
+            merge_hash_file(hashtab, &mut hashtab_value, None, Some(&mut inv_hashtab)).unwrap();
             process_diff_tree(diff_list, &hashtab_value, &inv_hashtab, !*revert);
         }
         Commands::ApplyDiffs {
@@ -139,10 +146,11 @@ fn main() {
             diff_list,
             flatten,
             clean,
+            version,
         } => {
             let mut hashtab_value = HashTab::new();
             if let Some(hashtab) = hashtab {
-                merge_hash_file(hashtab, &mut hashtab_value, None).unwrap();
+                merge_hash_file(hashtab, &mut hashtab_value, None, None).unwrap();
             }
             if *clean {
                 // Ignore result
@@ -154,6 +162,7 @@ fn main() {
             let mut slots = Slots::new();
             let mut changes =
                 build_change_structures(diff_list, &hashtab_value, &mut slots).unwrap();
+            filter_out_non_matching_versions(&mut changes, version.clone());
             slots.process_slots(&mut changes);
             apply_changes(
                 qml_root_path,

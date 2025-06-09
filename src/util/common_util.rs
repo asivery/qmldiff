@@ -18,6 +18,25 @@ use crate::{
     slots::Slots,
 };
 
+pub fn filter_out_non_matching_versions(changes: &mut Vec<Change>, ver: Option<String>) {
+    // If no env. version provided, allow all.
+    if let Some(ver) = &ver {
+        changes.retain(|x| {
+            match x.versions_allowed {
+                None => true, // If no version whitelist defined, allow all.
+                Some(ref vers) => {
+                    let retain = vers.contains(ver);
+                    if !retain {
+                        eprintln!("Warning: A change to file {:?} has been removed! Compatible with versions {:?}, currently running {}", x.destination, vers, ver);
+                    }
+
+                    retain
+                }
+            }
+        });
+    }
+}
+
 pub fn load_diff_file<P>(
     root_dir: Option<String>,
     file_path: P,

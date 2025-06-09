@@ -16,6 +16,8 @@ use std::{
 };
 use util::common_util::{load_diff_file, parse_diff, parse_qml};
 
+use crate::util::common_util::filter_out_non_matching_versions;
+
 mod hash;
 mod hashrules;
 mod hashtab;
@@ -34,6 +36,12 @@ lazy_static! {
     static ref CHANGES: Mutex<Vec<Change>> = Mutex::new(Vec::new());
     static ref POST_INIT: Mutex<bool> = Mutex::new(false);
     static ref HASHTAB_RULES: Mutex<Option<HashRules>> = Mutex::new(None);
+    static ref CURRENT_VERSION: Mutex<Option<String>> = Mutex::new(None);
+}
+
+#[no_mangle]
+unsafe extern "C" fn qmldiff_set_version(version: *const c_char) {
+    *CURRENT_VERSION.lock().unwrap() = Some(CStr::from_ptr(version).to_str().unwrap().into());
 }
 
 #[no_mangle]
@@ -83,6 +91,10 @@ extern "C" fn qmldiff_add_external_diff(
             false
         }
         Ok(mut contents) => {
+            filter_out_non_matching_versions(
+                &mut contents,
+                CURRENT_VERSION.lock().unwrap().clone(),
+            );
             SLOTS.lock().unwrap().update_slots(&mut contents);
             eprintln!("[qmldiff]: Loaded external {}", &file_identifier);
             CHANGES.lock().unwrap().extend(contents);
@@ -96,6 +108,7 @@ fn load_hashtab(root_dir: &str) {
     if let Err(x) = merge_hash_file(
         std::path::Path::new(&root_dir).join("hashtab"),
         &mut hashtab,
+        CURRENT_VERSION.lock().unwrap().clone(),
         None,
     ) {
         eprintln!("[qmldiff]: Failed to load hashtab: {}", x);
@@ -141,18 +154,18 @@ extern "C" fn qmldiff_build_change_files(root_dir: *const c_char) -> i32 {
         for file in &files {
             let fname_start = match file.rfind("/") {
                 Some(e) => e + 1,
-                None => 0
+                None => 0,
             };
             eprintln!("[qmldiff]: Loading file {}", &file[fname_start..]);
-            match load_diff_file(
-                Some(root_dir.clone()),
-                file,
-                &HASHTAB.lock().unwrap(),
-            ) {
+            match load_diff_file(Some(root_dir.clone()), file, &HASHTAB.lock().unwrap()) {
                 Err(problem) => {
                     eprintln!("[qmldiff]: Failed to load file {}: {:?}", file, problem)
                 }
                 Ok(mut contents) => {
+                    filter_out_non_matching_versions(
+                        &mut contents,
+                        CURRENT_VERSION.lock().unwrap().clone(),
+                    );
                     slots.update_slots(&mut contents);
                     all_changes.extend(contents);
                     loaded_files += 1;
@@ -260,7 +273,10 @@ pub extern "C" fn qmldiff_start_saving_thread() {
                     } else {
                         eprintln!("[qmldiff]: No rules to process.");
                     }
-                    let string = serialize_hashtab(&to_process_rules);
+                    let string = serialize_hashtab(
+                        &to_process_rules,
+                        CURRENT_VERSION.lock().unwrap().clone(),
+                    );
                     if let Err(e) = std::fs::write(&dist_hashmap_path, string) {
                         eprintln!(
                             "[qmldiff]: Cannot write to {}: {}",

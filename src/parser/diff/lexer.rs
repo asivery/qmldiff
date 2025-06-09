@@ -24,6 +24,7 @@ pub enum Keyword {
     End,
     Slot,
     Load,
+    Version,
 
     With,
     To,
@@ -63,6 +64,7 @@ impl Display for Keyword {
             Self::Traverse => "TRAVERSE",
             Self::With => "WITH",
             Self::To => "TO",
+            Self::Version => "VERSION",
 
             Self::Until => "UNTIL",
             Self::Argument => "ARGUMENT",
@@ -99,6 +101,7 @@ impl TryFrom<&str> for Keyword {
             "WITH" => Ok(Self::With),
             "TO" => Ok(Self::To),
             "END" => Ok(Self::End),
+            "VERSION" => Ok(Self::Version),
 
             "UNTIL" => Ok(Self::Until),
             "ARGUMENT" => Ok(Self::Argument),

@@ -151,6 +151,7 @@ pub enum ObjectToChange {
 pub struct Change {
     pub destination: ObjectToChange,
     pub changes: Vec<FileChangeAction>,
+    pub versions_allowed: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone)]
@@ -401,6 +402,7 @@ impl Parser {
                     | Keyword::Located
                     | Keyword::Rebuild
                     | Keyword::Replicate
+                    | Keyword::Version
                     | Keyword::Redefine => {
                         return error_received_expected!(kw, "Rebuild directive keyword");
                     }
@@ -691,6 +693,7 @@ impl Parser {
                 | Keyword::Argument
                 | Keyword::Until
                 | Keyword::Located
+                | Keyword::Version
                 | Keyword::At => error_received_expected!(kw, "Directive keyword"),
 
                 Keyword::Assert => Ok(FileChangeAction::Assert(self.read_tree()?)),
@@ -806,10 +809,12 @@ impl Parser {
 
     pub fn parse(&mut self) -> Result<Vec<Change>> {
         let mut output = Vec::default();
+        let mut versions_allowed = None;
 
         let mut current_working_file: Option<ObjectToChange> = None;
         let mut current_instructions = Vec::new();
         let mut in_slot = false;
+        let mut has_seen_non_version_statements = false;
         loop {
             // End of file condition:
             self.discard_whitespace();
@@ -847,6 +852,7 @@ impl Parser {
                         output.push(Change {
                             changes: take(&mut current_instructions),
                             destination: current_working_file.take().unwrap(),
+                            versions_allowed: versions_allowed.clone(),
                         });
                     }
                     _ => current_instructions.push(self.read_next_instruction(in_slot)?),
@@ -855,12 +861,36 @@ impl Parser {
                 // The affected file always needs to be set.
                 let next = self.next_lex()?;
                 match &next {
+                    TokenType::Keyword(Keyword::Version) if has_seen_non_version_statements => {
+                        return error_received_expected!(next, "AFFECT / SLOT / TEMPLATE statement (VERSION statements only allowed at the beginning of file!)");
+                    }
+                    TokenType::Keyword(Keyword::Version) if !has_seen_non_version_statements => {
+                        let version_allowed = match self.next_string_or_id() {
+                            Err(x) => {
+                                return error_received_expected!(x, "Version Identifier / String");
+                            }
+                            Ok(e) => e,
+                        };
+                        let version_allowed = version_allowed
+                            .trim_matches(&['"', '\'', '`', ' ', '\n'])
+                            .into();
+                        match versions_allowed {
+                            None => {
+                                versions_allowed = Some(vec![version_allowed]);
+                            }
+                            Some(ref mut x) => {
+                                x.push(version_allowed);
+                            }
+                        };
+                    }
                     TokenType::Keyword(Keyword::Affect) => {
+                        has_seen_non_version_statements = true;
                         current_working_file =
                             Some(ObjectToChange::File(self.next_string_or_id()?));
                         in_slot = false;
                     }
                     TokenType::Keyword(Keyword::Template) => {
+                        has_seen_non_version_statements = true;
                         let name = self.next_id()?;
                         let data = match self.next_lex() {
                             Ok(TokenType::QMLCode {
@@ -872,9 +902,11 @@ impl Parser {
                         output.push(Change {
                             destination: ObjectToChange::Template(name),
                             changes: vec![FileChangeAction::Insert(Insertable::Code(data))],
+                            versions_allowed: versions_allowed.clone(),
                         });
                     }
                     TokenType::Keyword(Keyword::Slot) => {
+                        has_seen_non_version_statements = true;
                         in_slot = true;
                         current_working_file = Some(match next {
                             TokenType::Keyword(Keyword::Slot) => {
@@ -884,12 +916,16 @@ impl Parser {
                         });
                     }
                     TokenType::Keyword(Keyword::Load) => {
+                        has_seen_non_version_statements = true;
                         let path = self.read_path()?;
                         self.load_from(&path, &mut output)?;
                     }
 
                     _ => {
-                        return error_received_expected!(next, "AFFECT / SLOT / TEMPLATE statement")
+                        return error_received_expected!(
+                            next,
+                            "AFFECT / SLOT / VERSION / TEMPLATE statement"
+                        )
                     }
                 }
             }
@@ -899,6 +935,7 @@ impl Parser {
             output.push(Change {
                 destination: current_working_file.take().unwrap(),
                 changes: std::mem::take(&mut current_instructions),
+                versions_allowed: versions_allowed.clone(),
             });
         }
 
