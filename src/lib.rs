@@ -94,6 +94,7 @@ extern "C" fn qmldiff_add_external_diff(
             filter_out_non_matching_versions(
                 &mut contents,
                 CURRENT_VERSION.lock().unwrap().clone(),
+                &file_identifier,
             );
             SLOTS.lock().unwrap().update_slots(&mut contents);
             eprintln!("[qmldiff]: Loaded external {}", &file_identifier);
@@ -165,6 +166,7 @@ extern "C" fn qmldiff_build_change_files(root_dir: *const c_char) -> i32 {
                     filter_out_non_matching_versions(
                         &mut contents,
                         CURRENT_VERSION.lock().unwrap().clone(),
+                        file,
                     );
                     slots.update_slots(&mut contents);
                     all_changes.extend(contents);

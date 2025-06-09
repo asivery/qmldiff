@@ -22,7 +22,7 @@ use crate::{
     processor::process,
     refcell_translation::{translate_from_root, untranslate_from_root},
     slots::Slots,
-    util::common_util::{load_diff_file, parse_qml},
+    util::common_util::{filter_out_non_matching_versions, load_diff_file, parse_qml},
 };
 
 fn build_recursive_hashmap(directory: &String, dir_relative_name: &String, tab: &mut HashTab) {
@@ -198,6 +198,7 @@ pub fn build_change_structures(
     files: &Vec<String>,
     hashtab: &HashTab,
     slots: &mut Slots,
+    version: Option<String>,
 ) -> Result<Vec<Change>> {
     let mut all_changes = Vec::new();
     for path_str in files {
@@ -209,6 +210,11 @@ pub fn build_change_structures(
             let root_dir = String::from(path.parent().unwrap().to_string_lossy());
             println!("Reading diff {}...", path.to_string_lossy());
             let mut this_diff = load_diff_file(Some(root_dir), path, hashtab)?;
+            filter_out_non_matching_versions(
+                &mut this_diff,
+                version.clone(),
+                &path.to_string_lossy(),
+            );
             slots.update_slots(&mut this_diff);
             all_changes.extend(this_diff);
         } else if path.is_dir() {
@@ -218,7 +224,13 @@ pub fn build_change_structures(
                     continue;
                 }
                 println!("Reading diff {}...", sub_file_path.to_string_lossy());
-                let mut this_diff = load_diff_file(Some(path_str.clone()), sub_file_path, hashtab)?;
+                let mut this_diff =
+                    load_diff_file(Some(path_str.clone()), &sub_file_path, hashtab)?;
+                filter_out_non_matching_versions(
+                    &mut this_diff,
+                    version.clone(),
+                    &sub_file_path.to_string_lossy(),
+                );
                 slots.update_slots(&mut this_diff);
                 all_changes.extend(this_diff);
             }

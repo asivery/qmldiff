@@ -8,8 +8,6 @@ use hashrules::HashRules;
 use hashtab::{merge_hash_file, serialize_hashtab, HashTab, InvHashTab};
 use slots::Slots;
 
-use crate::util::common_util::filter_out_non_matching_versions;
-
 #[path = "util/cli_util.rs"]
 mod cli_util;
 mod hash;
@@ -161,8 +159,8 @@ fn main() {
             let _ = create_dir(qml_destination_path);
             let mut slots = Slots::new();
             let mut changes =
-                build_change_structures(diff_list, &hashtab_value, &mut slots).unwrap();
-            filter_out_non_matching_versions(&mut changes, version.clone());
+                build_change_structures(diff_list, &hashtab_value, &mut slots, version.clone())
+                    .unwrap();
             slots.process_slots(&mut changes);
             apply_changes(
                 qml_root_path,

@@ -18,8 +18,16 @@ use crate::{
     slots::Slots,
 };
 
-pub fn filter_out_non_matching_versions(changes: &mut Vec<Change>, ver: Option<String>) {
+pub fn filter_out_non_matching_versions(
+    changes: &mut Vec<Change>,
+    ver: Option<String>,
+    from: &str,
+) {
     // If no env. version provided, allow all.
+    if changes.is_empty() {
+        return;
+    }
+
     if let Some(ver) = &ver {
         changes.retain(|x| {
             match x.versions_allowed {
@@ -27,13 +35,16 @@ pub fn filter_out_non_matching_versions(changes: &mut Vec<Change>, ver: Option<S
                 Some(ref vers) => {
                     let retain = vers.contains(ver);
                     if !retain {
-                        eprintln!("Warning: A change to file {:?} has been removed! Compatible with versions {:?}, currently running {}", x.destination, vers, ver);
+                        eprintln!("[qmldiff]: Warning: A change to file {:?} (defined by '{}') has been removed! Compatible with versions {:?}, currently running {}", x.destination, from, vers, ver);
                     }
 
                     retain
                 }
             }
         });
+        if changes.is_empty() {
+            eprintln!("[qmldiff]: Warning: All changes from '{}' have been blocked due to version mismatch!", from);
+        }
     }
 }
 
