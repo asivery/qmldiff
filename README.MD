@@ -66,6 +66,15 @@ the current root. Because of that, every traverse block needs to be terminated w
 
 The load statements loads the file with the path given as a QMLDiff file.
 
+
+#### `VERSION <allowed_version>`
+
+The version statement adds `allowed_version` to the list of allowed versions this patch file will apply to. There can be more than one `VERSION` statement in a QMD file, but they all must be located at the very top of the file.
+
+> [!NOTE]
+> Using a `VERSION` statement inside of a file makes it the "version-toplevel" file. No file loaded from it with the help of the `LOAD` statement can define more versions.
+
+
 #### `ASSERT <tree>`
 
 The ASSERT statement disambiguates a TRAVERSE statement by selecting only such roots, that
