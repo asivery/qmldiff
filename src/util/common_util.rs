@@ -35,7 +35,7 @@ pub fn filter_out_non_matching_versions(
                 Some(ref vers) => {
                     let retain = vers.contains(ver);
                     if !retain {
-                        eprintln!("[qmldiff]: Warning: A change to file {:?} (defined by '{}') has been removed! Compatible with versions {:?}, currently running {}", x.destination, from, vers, ver);
+                        eprintln!("[qmldiff]: Warning: A change to {:?} (defined by '{}') has been removed! Compatible with versions {:?}, currently running {}", x.destination, from, vers, ver);
                     }
 
                     retain
@@ -71,7 +71,7 @@ pub fn parse_diff(
         .collect();
     let mut parser = diff::parser::Parser::new(Box::new(tokens.into_iter()), root_dir);
 
-    parser.parse()
+    parser.parse(None)
 }
 
 pub fn parse_qml(

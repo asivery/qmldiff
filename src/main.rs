@@ -42,11 +42,12 @@ enum Commands {
         /// The name of the rules file to pa
         #[arg(default_value = None, required = false, long)]
         hashrules_name: Option<String>,
+        /// The version of the QML environment to encode in hashtab
+        #[arg(default_value = None, required = false, long)]
+        version: Option<String>,
         /// The name of the hashtab to create
         #[arg(default_value = "hashtab")]
         hashtab_name: String,
-        /// The version of the QML environment to encode in hashtab
-        version: Option<String>,
     },
     /// Dump the contents of a hashtab in a human-readable form
     DumpHashtab {
@@ -72,7 +73,7 @@ enum Commands {
     /// Apply the diffs for a given hashtab and QML root path
     ApplyDiffs {
         /// The hashtab to use
-        #[arg(short, long)]
+        #[arg(long)]
         hashtab: Option<String>,
         /// The root path of the QML tree
         qml_root_path: String,
@@ -90,6 +91,7 @@ enum Commands {
         // #[arg(short, long, action = clap::ArgAction::SetTrue)]
         // watch_for_changes: bool,
         /// The QML environment version
+        #[arg(default_value = None, required = false, long)]
         version: Option<String>,
     },
 }

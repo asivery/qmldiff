@@ -771,7 +771,7 @@ impl Parser {
         }
     }
 
-    fn load_from(&mut self, file: &str, output: &mut Vec<Change>) -> Result<()> {
+    fn load_from(&mut self, file: &str, output: &mut Vec<Change>, versions_allowed: Option<Vec<String>>) -> Result<()> {
         if let Some(ref root) = self.root_path {
             let new_path = Path::new(file);
             if new_path.is_absolute() {
@@ -800,16 +800,20 @@ impl Parser {
                 ),
                 Some(moved_root),
             );
-            output.extend(parser.parse()?);
+            output.extend(parser.parse(versions_allowed.clone())?);
             Ok(())
         } else {
             Err(Error::msg("Cannot load a file if no root path set!"))
         }
     }
 
-    pub fn parse(&mut self) -> Result<Vec<Change>> {
+    pub fn parse(&mut self, parent_versions_allowed: Option<Vec<String>>) -> Result<Vec<Change>> {
         let mut output = Vec::default();
-        let mut versions_allowed = None;
+        // If we're loading a file using the `LOAD` keyword, the allowed versions should be propagated from the
+        // parent ONLY. Do not allow defining more allowed versions in non-root files.
+        // (Unless the root file does not provide any supported versions' list. Then allow it.)
+        let allow_new_version_definitions = parent_versions_allowed.is_none();
+        let mut versions_allowed = parent_versions_allowed;
 
         let mut current_working_file: Option<ObjectToChange> = None;
         let mut current_instructions = Vec::new();
@@ -861,6 +865,11 @@ impl Parser {
                 // The affected file always needs to be set.
                 let next = self.next_lex()?;
                 match &next {
+                    TokenType::Keyword(Keyword::Version) if !allow_new_version_definitions => {
+                        return Err(Error::msg(format!(
+                            "Error while parsing: Files loaded using the LOAD keyword cannot define more supported versions!"
+                        )))
+                    }
                     TokenType::Keyword(Keyword::Version) if has_seen_non_version_statements => {
                         return error_received_expected!(next, "AFFECT / SLOT / TEMPLATE statement (VERSION statements only allowed at the beginning of file!)");
                     }
@@ -918,7 +927,7 @@ impl Parser {
                     TokenType::Keyword(Keyword::Load) => {
                         has_seen_non_version_statements = true;
                         let path = self.read_path()?;
-                        self.load_from(&path, &mut output)?;
+                        self.load_from(&path, &mut output, versions_allowed.clone())?;
                     }
 
                     _ => {
