@@ -192,7 +192,8 @@ impl Parser {
         loop {
             let token = self.stream.peek();
             match token {
-                Some(TokenType::Symbol(chr)) => {
+                Some(TokenType::Symbol(chr)) |
+                Some(TokenType::Unknown(chr)) => {
                     if *chr == delim {
                         if next_delim {
                             final_string.push(*chr);
