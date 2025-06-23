@@ -42,6 +42,7 @@ lazy_static! {
 #[no_mangle]
 unsafe extern "C" fn qmldiff_set_version(version: *const c_char) {
     *CURRENT_VERSION.lock().unwrap() = Some(CStr::from_ptr(version).to_str().unwrap().into());
+    eprintln!("[qmldiff]: Set system version to {}", (*CURRENT_VERSION.lock().unwrap()).as_ref().unwrap());
 }
 
 #[no_mangle]
