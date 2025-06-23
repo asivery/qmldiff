@@ -773,15 +773,7 @@ fn rebuild_child(
     let mut arguments_token_length = 0;
     let mut arguments = None;
     match child {
-        TranslatedObjectChild::Assignment(assign) => match &assign.value {
-            AssignmentChildValue::Other(stream) => {
-                if let Ok((a, b)) = parse_argument_stream(&stream) {
-                    arguments = Some(a);
-                    arguments_token_length = b;
-                }
-            }
-            _ => unreachable!(),
-        },
+        TranslatedObjectChild::Assignment(_) => {},
         TranslatedObjectChild::Function(func) => {
             let (a, b) = parse_argument_stream(&func.arguments)?;
             arguments = Some(a);
