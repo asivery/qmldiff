@@ -284,7 +284,12 @@ pub fn apply_changes(
         };
         let mut tree = translate_from_root(parse_qml(file_contents, &file_to_edit, None, None)?);
         for change in changes {
-            process(&mut tree, change, slots)?
+            if let Err(error) = process(&mut tree, change, slots) {
+                return Err(Error::msg(format!(
+                    "(On behalf of '{}'): {:?}",
+                    change.source, error
+                )))
+            }
         }
         // Rewrite the file in destination
         let destination_path = if flatten {
