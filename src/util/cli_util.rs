@@ -39,8 +39,13 @@ fn build_recursive_hashmap(directory: &String, dir_relative_name: &String, tab: 
         if t.is_file() {
             if name.ends_with(".qml") {
                 println!("Hashing {}", file.path().to_str().unwrap());
-                let tree =
-                    parse_qml(std::fs::read_to_string(file.path()).unwrap(), None, None).unwrap();
+                let tree = parse_qml(
+                    std::fs::read_to_string(file.path()).unwrap(),
+                    &name,
+                    None,
+                    None,
+                )
+                .unwrap();
                 update_hashtab_from_tree(&tree, tab);
             }
         } else {
@@ -89,7 +94,7 @@ fn process_single_diff(
     };
     let mut token_stream: Vec<TokenType> =
         diff::lexer::Lexer::new(StringCharacterTokenizer::new(string_contents))
-            .map(|e| diff_hash_remapper(hashtab, e).unwrap())
+            .map(|e| diff_hash_remapper(hashtab, e, diff_file_path).unwrap())
             .collect();
     if into_hash {
         token_stream = token_stream
@@ -179,7 +184,7 @@ fn process_single_diff(
                     } => TokenType::QMLCode {
                         qml_code: qml_code
                             .into_iter()
-                            .map(|e| qml_hash_remap(hashtab, e).unwrap())
+                            .map(|e| qml_hash_remap(hashtab, e, diff_file_path).unwrap())
                             .collect::<Vec<_>>(),
                         stream_character,
                     },
@@ -277,7 +282,7 @@ pub fn apply_changes(
                 )))
             }
         };
-        let mut tree = translate_from_root(parse_qml(file_contents, None, None)?);
+        let mut tree = translate_from_root(parse_qml(file_contents, &file_to_edit, None, None)?);
         for change in changes {
             process(&mut tree, change, slots)?
         }

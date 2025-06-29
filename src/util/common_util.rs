@@ -1,4 +1,4 @@
-use std::{fs::read_to_string, path::Path};
+use std::{fs::read_to_string, path::Path, sync::Arc};
 
 use anyhow::{Error, Result};
 
@@ -56,32 +56,44 @@ pub fn load_diff_file<P>(
 where
     P: AsRef<Path>,
 {
-    let contents = read_to_string(file_path)?;
-    parse_diff(root_dir, contents, hashtab)
+    let contents = read_to_string(&file_path)?;
+    parse_diff(
+        root_dir,
+        contents,
+        &file_path.as_ref().to_string_lossy(),
+        hashtab,
+    )
 }
 
 pub fn parse_diff(
     root_dir: Option<String>,
     contents: String,
+    diff_name: &str,
     hashtab: &HashTab,
 ) -> Result<Vec<Change>> {
     let lexer = diff::lexer::Lexer::new(StringCharacterTokenizer::new(contents));
     let tokens: Vec<diff::lexer::TokenType> = lexer
-        .map(|e| diff_hash_remapper(hashtab, e).unwrap())
+        .map(|e| diff_hash_remapper(hashtab, e, diff_name).unwrap())
         .collect();
-    let mut parser = diff::parser::Parser::new(Box::new(tokens.into_iter()), root_dir);
+    let mut parser = diff::parser::Parser::new(
+        Box::new(tokens.into_iter()),
+        root_dir,
+        Arc::from(diff_name.to_string()),
+    );
 
     parser.parse(None)
 }
 
 pub fn parse_qml(
     raw_qml: String,
+    qml_name: &str,
     hashtab: Option<&HashTab>,
     slots: Option<&mut Slots>,
 ) -> Result<Vec<TreeElement>> {
-    let mut iterator = IteratorPipeline::new(Box::from(Lexer::new(StringCharacterTokenizer::new(
-        raw_qml,
-    ))));
+    let mut iterator = IteratorPipeline::new(
+        Box::from(Lexer::new(StringCharacterTokenizer::new(raw_qml))),
+        qml_name,
+    );
     let mut hash_mapper;
     if hashtab.is_some() {
         hash_mapper = QMLHashRemapper::new(hashtab.unwrap());

@@ -129,9 +129,12 @@ impl Slots {
                 _ => unreachable!(),
             };
             let res = {
+                let template_user_facing_name = format!("<TEMPLATE>({})", template_name);
                 let mut remapper = QMLSlotRemapper::new(&mut temp_slots);
-                let mut iterator =
-                    IteratorPipeline::new(Box::new(template_contents.clone().into_iter()));
+                let mut iterator: IteratorPipeline<'_, TokenType, &str> = IteratorPipeline::new(
+                    Box::new(template_contents.clone().into_iter()),
+                    &template_user_facing_name,
+                );
                 iterator.add_remapper(&mut remapper);
                 iterator.collect::<Vec<_>>()
             };

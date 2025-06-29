@@ -17,8 +17,8 @@ impl<'a> QMLSlotRemapper<'a> {
     }
 }
 
-impl IteratorRemapper<TokenType> for QMLSlotRemapper<'_> {
-    fn remap(&mut self, value: TokenType) -> ChainIteratorRemapper<TokenType> {
+impl IteratorRemapper<TokenType, &str> for QMLSlotRemapper<'_> {
+    fn remap(&mut self, value: TokenType, _: &&str) -> ChainIteratorRemapper<TokenType> {
         match value {
             TokenType::Extension(QMLExtensionToken::Slot(id)) => {
                 if let Some(slot_ref) = self.slots.0.get_mut(&id) {

@@ -42,7 +42,10 @@ lazy_static! {
 #[no_mangle]
 unsafe extern "C" fn qmldiff_set_version(version: *const c_char) {
     *CURRENT_VERSION.lock().unwrap() = Some(CStr::from_ptr(version).to_str().unwrap().into());
-    eprintln!("[qmldiff]: Set system version to {}", (*CURRENT_VERSION.lock().unwrap()).as_ref().unwrap());
+    eprintln!(
+        "[qmldiff]: Set system version to {}",
+        (*CURRENT_VERSION.lock().unwrap()).as_ref().unwrap()
+    );
 }
 
 #[no_mangle]
@@ -83,7 +86,12 @@ extern "C" fn qmldiff_add_external_diff(
         .to_str()
         .unwrap()
         .into();
-    match parse_diff(None, change_file_contents, &HASHTAB.lock().unwrap()) {
+    match parse_diff(
+        None,
+        change_file_contents,
+        &file_identifier,
+        &HASHTAB.lock().unwrap(),
+    ) {
         Err(problem) => {
             eprintln!(
                 "[qmldiff]: Failed to load external {}: {:?}",
@@ -232,7 +240,7 @@ pub unsafe extern "C" fn qmldiff_process_file(
     // It is modified.
     // Build the tree.
     let contents: String = CStr::from_ptr(raw_contents).to_str().unwrap().into();
-    let tree = parse_qml(contents, None, None);
+    let tree = parse_qml(contents, &file_name, None, None);
     eprintln!("[qmldiff]: Processing file {}...", &file_name);
     match tree {
         Ok(tree) => {

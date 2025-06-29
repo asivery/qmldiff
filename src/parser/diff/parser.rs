@@ -1,4 +1,4 @@
-use std::{collections::HashMap, iter::Peekable, mem::take, path::Path};
+use std::{collections::HashMap, iter::Peekable, mem::take, path::Path, sync::Arc};
 
 use crate::{
     error_received_expected,
@@ -9,6 +9,7 @@ use anyhow::{Error, Result};
 use super::lexer::{Keyword, Lexer, TokenType};
 
 pub struct Parser {
+    source_name: Arc<String>,
     stream: Peekable<Box<dyn Iterator<Item = TokenType>>>,
     root_path: Option<String>,
 }
@@ -149,6 +150,7 @@ pub enum ObjectToChange {
 
 #[derive(Debug, Clone)]
 pub struct Change {
+    pub source: Arc<String>,
     pub destination: ObjectToChange,
     pub changes: Vec<FileChangeAction>,
     pub versions_allowed: Option<Vec<String>>,
@@ -771,7 +773,12 @@ impl Parser {
         }
     }
 
-    fn load_from(&mut self, file: &str, output: &mut Vec<Change>, versions_allowed: Option<Vec<String>>) -> Result<()> {
+    fn load_from(
+        &mut self,
+        file: &str,
+        output: &mut Vec<Change>,
+        versions_allowed: Option<Vec<String>>,
+    ) -> Result<()> {
         if let Some(ref root) = self.root_path {
             let new_path = Path::new(file);
             if new_path.is_absolute() {
@@ -799,6 +806,7 @@ impl Parser {
                         .into_iter(),
                 ),
                 Some(moved_root),
+                Arc::from(full_path.to_string_lossy().to_string()),
             );
             output.extend(parser.parse(versions_allowed.clone())?);
             Ok(())
@@ -854,6 +862,7 @@ impl Parser {
                             _ => return error_received_expected!(next, "AFFECT / SLOT / Template"),
                         }
                         output.push(Change {
+                            source: self.source_name.clone(),
                             changes: take(&mut current_instructions),
                             destination: current_working_file.take().unwrap(),
                             versions_allowed: versions_allowed.clone(),
@@ -909,6 +918,7 @@ impl Parser {
                             _ => panic!("Expected TEMPLATE <name> {{...}}"),
                         };
                         output.push(Change {
+                            source: self.source_name.clone(),
                             destination: ObjectToChange::Template(name),
                             changes: vec![FileChangeAction::Insert(Insertable::Code(data))],
                             versions_allowed: versions_allowed.clone(),
@@ -942,6 +952,7 @@ impl Parser {
 
         if current_working_file.is_some() {
             output.push(Change {
+                source: self.source_name.clone(),
                 destination: current_working_file.take().unwrap(),
                 changes: std::mem::take(&mut current_instructions),
                 versions_allowed: versions_allowed.clone(),
@@ -954,8 +965,10 @@ impl Parser {
     pub fn new(
         token_stream: Box<dyn Iterator<Item = TokenType>>,
         root_path: Option<String>,
+        source_name: Arc<String>,
     ) -> Parser {
         Parser {
+            source_name,
             stream: token_stream.peekable(),
             root_path,
         }

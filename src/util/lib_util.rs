@@ -23,7 +23,7 @@ pub unsafe fn include_if_building_hashtab(file_name: &str, raw_contents: *const 
         hashtab.insert(hash(file_name), String::from(file_name));
         if file_name.to_lowercase().ends_with(".qml") {
             let contents: String = CStr::from_ptr(raw_contents).to_str().unwrap().into();
-            let tree = parse_qml(contents, None, None);
+            let tree = parse_qml(contents, file_name, None, None);
             if let Ok(tree) = tree {
                 update_hashtab_from_tree(&tree, &mut hashtab);
             } else {

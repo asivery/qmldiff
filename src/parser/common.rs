@@ -19,13 +19,14 @@ pub enum ChainIteratorRemapper<T> {
     Error(Error),
 }
 
-pub trait IteratorRemapper<T> {
-    fn remap(&mut self, value: T) -> ChainIteratorRemapper<T>;
+pub trait IteratorRemapper<T, Ctx> {
+    fn remap(&mut self, value: T, context: &Ctx) -> ChainIteratorRemapper<T>;
 }
 
-pub struct IteratorPipeline<'a, T> {
+pub struct IteratorPipeline<'a, T, Ctx> {
+    context: Ctx,
     iterators: Vec<Box<dyn Iterator<Item = T>>>,
-    remappers: Vec<&'a mut dyn IteratorRemapper<T>>,
+    remappers: Vec<&'a mut dyn IteratorRemapper<T, Ctx>>,
 }
 
 enum InternalChainIterValue<T> {
@@ -33,21 +34,22 @@ enum InternalChainIterValue<T> {
     End,
     Reload,
 }
-impl<'a, T> IteratorPipeline<'a, T> {
-    pub fn new(root_iterator: Box<dyn Iterator<Item = T>>) -> Self {
+impl<'a, T, Ctx> IteratorPipeline<'a, T, Ctx> {
+    pub fn new(root_iterator: Box<dyn Iterator<Item = T>>, context: Ctx) -> Self {
         Self {
             iterators: vec![root_iterator],
             remappers: Vec::new(),
+            context,
         }
     }
 
-    pub fn add_remapper(&mut self, remapper: &'a mut dyn IteratorRemapper<T>) {
+    pub fn add_remapper(&mut self, remapper: &'a mut dyn IteratorRemapper<T, Ctx>) {
         self.remappers.push(remapper);
     }
 
     fn remap(&mut self, mut item: T) -> InternalChainIterValue<T> {
         for rm in self.remappers.iter_mut() {
-            let remapped = match rm.remap(item) {
+            let remapped = match rm.remap(item, &self.context) {
                 ChainIteratorRemapper::Chain(ch) => {
                     self.iterators.extend(ch);
                     InternalChainIterValue::Reload
@@ -73,7 +75,7 @@ impl<'a, T> IteratorPipeline<'a, T> {
     }
 }
 
-impl<T> Iterator for IteratorPipeline<'_, T> {
+impl<T, Ctx> Iterator for IteratorPipeline<'_, T, Ctx> {
     type Item = T;
 
     fn next(&mut self) -> Option<T> {

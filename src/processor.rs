@@ -41,9 +41,15 @@ pub fn find_and_process(
 ) -> Result<()> {
     for diff in diffs {
         match &diff.destination {
-            ObjectToChange::File(f) if f == file_name => {
-                process(qml, diff, slots)?;
-            }
+            ObjectToChange::File(f) if f == file_name => match process(qml, diff, slots) {
+                Ok(_) => {}
+                Err(error) => {
+                    return Err(Error::msg(format!(
+                        "(On behalf of '{}'): {:?}",
+                        diff.source, error
+                    )))
+                }
+            },
             _ => {}
         }
     }
@@ -285,32 +291,35 @@ fn insert_into_root(
     code: &[TokenType],
     slots: &mut Slots,
 ) -> Result<()> {
-    let mut raw_qml = IteratorPipeline::new(Box::new(
-        if matches!(root, TreeRoot::Object(_)) {
-            let mut new_data = vec![
-                TokenType::Identifier("Object".to_string()),
-                TokenType::Symbol('{'),
-            ];
-            new_data.extend_from_slice(code);
-            new_data.push(TokenType::Symbol('}'));
+    let mut raw_qml = IteratorPipeline::new(
+        Box::new(
+            if matches!(root, TreeRoot::Object(_)) {
+                let mut new_data = vec![
+                    TokenType::Identifier("Object".to_string()),
+                    TokenType::Symbol('{'),
+                ];
+                new_data.extend_from_slice(code);
+                new_data.push(TokenType::Symbol('}'));
 
-            new_data
-        } else {
-            let mut new_data = vec![
-                TokenType::Identifier("Object".to_string()),
-                TokenType::Symbol('{'),
-                TokenType::Keyword(crate::parser::qml::lexer::Keyword::Enum),
-                TokenType::Identifier("Enum".to_string()),
-                TokenType::Symbol('{'),
-            ];
-            new_data.extend_from_slice(code);
-            new_data.push(TokenType::Symbol('}'));
-            new_data.push(TokenType::Symbol('}'));
+                new_data
+            } else {
+                let mut new_data = vec![
+                    TokenType::Identifier("Object".to_string()),
+                    TokenType::Symbol('{'),
+                    TokenType::Keyword(crate::parser::qml::lexer::Keyword::Enum),
+                    TokenType::Identifier("Enum".to_string()),
+                    TokenType::Symbol('{'),
+                ];
+                new_data.extend_from_slice(code);
+                new_data.push(TokenType::Symbol('}'));
+                new_data.push(TokenType::Symbol('}'));
 
-            new_data
-        }
-        .into_iter(),
-    ));
+                new_data
+            }
+            .into_iter(),
+        ),
+        "<AST regeneration>",
+    );
     let mut slot_resolver = QMLSlotRemapper::new(slots);
     raw_qml.add_remapper(&mut slot_resolver);
     // Start the QML parser...
@@ -773,7 +782,7 @@ fn rebuild_child(
     let mut arguments_token_length = 0;
     let mut arguments = None;
     match child {
-        TranslatedObjectChild::Assignment(_) => {},
+        TranslatedObjectChild::Assignment(_) => {}
         TranslatedObjectChild::Function(func) => {
             let (a, b) = parse_argument_stream(&func.arguments)?;
             arguments = Some(a);
