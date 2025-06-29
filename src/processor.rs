@@ -426,7 +426,7 @@ fn find_beginning_of_function(stream: &Vec<TokenType>, mut start: usize) -> usiz
             }
         }
     }
-    return start;
+    start
 }
 
 fn build_arguments_token_stream(args: Vec<String>) -> Vec<TokenType> {
@@ -598,7 +598,7 @@ fn execute_rebuild_steps(
                 LocateRebuildActionSelector::Stream(stream) => {
                     let current_position = if position == usize::MAX { 0 } else { position };
                     let (new_base_pos, length) = match find_substream_in_stream(
-                        &main_body_stream,
+                        main_body_stream,
                         stream,
                         current_position,
                         true,
@@ -625,7 +625,7 @@ fn execute_rebuild_steps(
                         unambiguous_position!();
                         if let Some(ref located) = located {
                             if let Some((position_located, length_located)) =
-                                find_substream_in_stream(&main_body_stream, located, position, true)
+                                find_substream_in_stream(main_body_stream, located, position, true)
                             {
                                 if position_located == position {
                                     // We're OK - remove
@@ -649,7 +649,7 @@ fn execute_rebuild_steps(
                         // Make sure the cursor is located where 'literal' starts at
                         unambiguous_position!();
                         if let Some((found_position, length)) =
-                            find_substream_in_stream(&main_body_stream, literal, position, true)
+                            find_substream_in_stream(main_body_stream, literal, position, true)
                         {
                             if found_position == position {
                                 // We're OK - remove
@@ -672,7 +672,7 @@ fn execute_rebuild_steps(
                     RemoveRebuildAction::UntilStream(until_stream) => {
                         located = Some(until_stream.clone());
                         if let Some((until_stream_location, _)) = find_substream_in_stream(
-                            &main_body_stream,
+                            main_body_stream,
                             until_stream,
                             position,
                             true,
@@ -703,7 +703,7 @@ fn execute_rebuild_steps(
                 };
                 let mut until_position = match &replace.until_stream {
                     Some(stream) => {
-                        match find_substream_in_stream(&main_body_stream, stream, position, false) {
+                        match find_substream_in_stream(main_body_stream, stream, position, false) {
                             Some((pos, _len)) => pos,
                             None => {
                                 return Err(Error::msg(format!(
@@ -719,7 +719,7 @@ fn execute_rebuild_steps(
                 let mut position = position;
                 while position < until_position {
                     let (found_index, source_length) = match find_substream_in_stream(
-                        &main_body_stream,
+                        main_body_stream,
                         &source_stream,
                         position,
                         false,
@@ -791,7 +791,7 @@ fn rebuild_child(
         TranslatedObjectChild::Property(prop) => match &prop.default_value {
             Some(AssignmentChildValue::Object(_)) => {}
             Some(AssignmentChildValue::Other(stream)) => {
-                if let Ok((a, b)) = parse_argument_stream(&stream) {
+                if let Ok((a, b)) = parse_argument_stream(stream) {
                     arguments = Some(a);
                     arguments_token_length = b;
                 }
@@ -817,7 +817,7 @@ fn rebuild_child(
             }
             TranslatedObjectChild::Assignment(assign) => match assign.value {
                 AssignmentChildValue::Other(ref mut stream) => {
-                    let mut begin = find_beginning_of_function(&stream, arguments_token_length);
+                    let mut begin = find_beginning_of_function(stream, arguments_token_length);
                     let mut end = stream.len();
                     let enclosed = stream[begin] == TokenType::Symbol('{');
                     if enclosed {
@@ -830,7 +830,7 @@ fn rebuild_child(
             },
             TranslatedObjectChild::Property(prop) => match prop.default_value {
                 Some(AssignmentChildValue::Other(ref mut stream)) => {
-                    let mut begin = find_beginning_of_function(&stream, arguments_token_length);
+                    let mut begin = find_beginning_of_function(stream, arguments_token_length);
                     let mut end = stream.len();
                     let enclosed = stream[begin] == TokenType::Symbol('{');
                     if enclosed {

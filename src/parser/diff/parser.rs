@@ -795,7 +795,7 @@ impl Parser {
                 }
             };
             let moved_root = if let Some(e) = Path::new(file).parent() {
-                String::from(Path::new(root).join(&e).to_string_lossy())
+                String::from(Path::new(root).join(e).to_string_lossy())
             } else {
                 root.clone()
             };
@@ -875,9 +875,7 @@ impl Parser {
                 let next = self.next_lex()?;
                 match &next {
                     TokenType::Keyword(Keyword::Version) if !allow_new_version_definitions => {
-                        return Err(Error::msg(format!(
-                            "Error while parsing: Files loaded using the LOAD keyword cannot define more supported versions!"
-                        )))
+                        return Err(Error::msg("Error while parsing: Files loaded using the LOAD keyword cannot define more supported versions!".to_string()))
                     }
                     TokenType::Keyword(Keyword::Version) if has_seen_non_version_statements => {
                         return error_received_expected!(next, "AFFECT / SLOT / TEMPLATE statement (VERSION statements only allowed at the beginning of file!)");
@@ -890,7 +888,7 @@ impl Parser {
                             Ok(e) => e,
                         };
                         let version_allowed = version_allowed
-                            .trim_matches(&['"', '\'', '`', ' ', '\n'])
+                            .trim_matches(['"', '\'', '`', ' ', '\n'])
                             .into();
                         match versions_allowed {
                             None => {

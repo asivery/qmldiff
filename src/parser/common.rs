@@ -148,19 +148,12 @@ pub trait GenericLexerBase {
     }
 }
 
+#[derive(Default)]
 pub struct StringCharacterTokenizer {
     pub input: String,   // Raw input string
     pub position: usize, // current position in the input
 }
 
-impl Default for StringCharacterTokenizer {
-    fn default() -> Self {
-        Self {
-            input: String::default(),
-            position: 0,
-        }
-    }
-}
 
 impl StringCharacterTokenizer {
     pub fn new(input: String) -> Self {

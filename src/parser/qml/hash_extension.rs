@@ -45,7 +45,7 @@ pub fn qml_hash_remap(hashtab: &HashTab, token: TokenType, source_name: &str) ->
 
 impl IteratorRemapper<TokenType, &str> for QMLHashRemapper<'_> {
     fn remap(&mut self, value: TokenType, source_name: &&str) -> ChainIteratorRemapper<TokenType> {
-        match qml_hash_remap(self.hashtab, value, *source_name) {
+        match qml_hash_remap(self.hashtab, value, source_name) {
             Ok(e) => ChainIteratorRemapper::Value(e),
             Err(e) => ChainIteratorRemapper::Error(e),
         }
