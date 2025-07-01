@@ -18,7 +18,7 @@ pub fn emit_token_stream(stream: Vec<super::lexer::TokenType>) -> String {
     let mut output_string = String::new();
     for token in stream {
         let token_string = match token {
-            TokenType::Comment(cmnt) => format!("; {}", cmnt),
+            TokenType::Comment(cmnt) => format!(";{}", cmnt),
             TokenType::EndOfStream => String::default(),
             TokenType::Identifier(id) => id,
             TokenType::Keyword(kw) => kw.to_string(),
@@ -29,7 +29,7 @@ pub fn emit_token_stream(stream: Vec<super::lexer::TokenType>) -> String {
             } => {
                 let emitted = flatten_lines(&qml::emitter::emit_token_stream(&qml_code, 0));
                 if let Some(token) = stream_character {
-                    format!("STREAM {} {} {}", &token, emitted, &token)
+                    format!("STREAM {}{}{}", &token, emitted, &token)
                 } else {
                     format!("{{{}}}", emitted)
                 }
