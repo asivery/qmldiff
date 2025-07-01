@@ -94,6 +94,11 @@ enum Commands {
         #[arg(default_value = None, required = false, long)]
         version: Option<String>,
     },
+    /// Create the greatest-common-divisor of a list of hashtabs
+    GCDHashtab {
+        output_hashtab: String,
+        hashtabs: Vec<String>,
+    }
 }
 
 fn main() {
@@ -192,6 +197,21 @@ fn main() {
                     println!("- {}", slot);
                 }
             }
+        },
+        Commands::GCDHashtab { output_hashtab, hashtabs } => {
+            let mut out = HashTab::new();
+            for file in hashtabs {
+                let mut val = HashTab::new();
+                merge_hash_file(file, &mut val, None, None).unwrap();
+                if out.is_empty() {
+                    out = val;
+                } else {
+                    out.retain(|key, _value| {
+                        val.contains_key(key)
+                    });
+                }
+            }
+            std::fs::write(output_hashtab, serialize_hashtab(&out, None)).unwrap();
         }
     }
 }
