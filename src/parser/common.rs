@@ -154,7 +154,6 @@ pub struct StringCharacterTokenizer {
     pub position: usize, // current position in the input
 }
 
-
 impl StringCharacterTokenizer {
     pub fn new(input: String) -> Self {
         Self { input, position: 0 }

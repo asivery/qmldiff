@@ -2,16 +2,18 @@ use std::{collections::HashMap, iter::Peekable, mem::take, path::Path, sync::Arc
 
 use crate::{
     error_received_expected,
-    parser::{common::StringCharacterTokenizer, qml},
+    hashtab::HashTab,
+    parser::{common::StringCharacterTokenizer, diff::hash_processor::diff_hash_remapper, qml},
 };
 use anyhow::{Error, Result};
 
 use super::lexer::{Keyword, Lexer, TokenType};
 
-pub struct Parser {
+pub struct Parser<'a> {
     source_name: Arc<String>,
     stream: Peekable<Box<dyn Iterator<Item = TokenType>>>,
     root_path: Option<String>,
+    hashtab: Option<&'a HashTab>,
 }
 
 #[derive(Debug, Clone)]
@@ -216,7 +218,7 @@ fn trim_token_stream(token_stream: &mut Vec<qml::lexer::TokenType>) {
     }
 }
 
-impl Parser {
+impl<'a> Parser<'a> {
     fn next_lex(&mut self) -> Result<TokenType> {
         self.discard_whitespace();
 
@@ -800,13 +802,23 @@ impl Parser {
                 root.clone()
             };
             let mut parser = Self::new(
-                Box::new(
-                    Lexer::new(StringCharacterTokenizer::new(file_contents))
-                        .collect::<Vec<TokenType>>()
-                        .into_iter(),
-                ),
+                Box::new({
+                    if let Some(hashtab) = self.hashtab {
+                        Lexer::new(StringCharacterTokenizer::new(file_contents))
+                            .map(|e| {
+                                diff_hash_remapper(hashtab, e, &full_path.to_string_lossy())
+                                    .unwrap()
+                            })
+                            .collect::<Vec<TokenType>>()
+                    } else {
+                        Lexer::new(StringCharacterTokenizer::new(file_contents))
+                            .collect::<Vec<TokenType>>()
+                    }
+                    .into_iter()
+                }),
                 Some(moved_root),
                 Arc::from(full_path.to_string_lossy().to_string()),
+                self.hashtab,
             );
             output.extend(parser.parse(versions_allowed.clone())?);
             Ok(())
@@ -964,11 +976,13 @@ impl Parser {
         token_stream: Box<dyn Iterator<Item = TokenType>>,
         root_path: Option<String>,
         source_name: Arc<String>,
-    ) -> Parser {
+        hashtab: Option<&'a HashTab>,
+    ) -> Parser<'a> {
         Parser {
             source_name,
             stream: token_stream.peekable(),
             root_path,
+            hashtab,
         }
     }
 }

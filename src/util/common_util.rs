@@ -79,6 +79,7 @@ pub fn parse_diff(
         Box::new(tokens.into_iter()),
         root_dir,
         Arc::from(diff_name.to_string()),
+        Some(hashtab),
     );
 
     parser.parse(None)

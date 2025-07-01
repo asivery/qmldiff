@@ -288,7 +288,7 @@ pub fn apply_changes(
                 return Err(Error::msg(format!(
                     "(On behalf of '{}'): {:?}",
                     change.source, error
-                )))
+                )));
             }
         }
         // Rewrite the file in destination

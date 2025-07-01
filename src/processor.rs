@@ -671,12 +671,9 @@ fn execute_rebuild_steps(
                     }
                     RemoveRebuildAction::UntilStream(until_stream) => {
                         located = Some(until_stream.clone());
-                        if let Some((until_stream_location, _)) = find_substream_in_stream(
-                            main_body_stream,
-                            until_stream,
-                            position,
-                            true,
-                        ) {
+                        if let Some((until_stream_location, _)) =
+                            find_substream_in_stream(main_body_stream, until_stream, position, true)
+                        {
                             main_body_stream.splice(position..until_stream_location, vec![]);
                         } else {
                             return Err(Error::msg(
