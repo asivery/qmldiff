@@ -555,7 +555,7 @@ Right now the following subcommands are supported:
 - hash-diffs `<hashtab> <diff 1> [diff 2]... [-r]`
     * Turns all the diffs provided into their hashed versions (using the provided hashtab). This operation changes the diffs IN PLACE!
     * `-r` flag reverts this operation.
-- apply-diffs `<hashtab> <QML root> <QML destination> [...diffs] [-f] [-c]`
+- apply-diffs `[--hashtab <hashtab>] <QML root> <QML destination> [...diffs] [-f] [-c]`
     * Applies all the provided diffs to the QML files within QML root, then writes the results to QML destination.
     * `-f` flattens the output file tree into the root directory
     * `-c` deletes the QML destination directory before applying the diffs.
