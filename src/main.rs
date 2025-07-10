@@ -98,7 +98,7 @@ enum Commands {
     GCDHashtab {
         output_hashtab: String,
         hashtabs: Vec<String>,
-    }
+    },
 }
 
 fn main() {
@@ -197,8 +197,11 @@ fn main() {
                     println!("- {}", slot);
                 }
             }
-        },
-        Commands::GCDHashtab { output_hashtab, hashtabs } => {
+        }
+        Commands::GCDHashtab {
+            output_hashtab,
+            hashtabs,
+        } => {
             let mut out = HashTab::new();
             for file in hashtabs {
                 let mut val = HashTab::new();
@@ -206,9 +209,7 @@ fn main() {
                 if out.is_empty() {
                     out = val;
                 } else {
-                    out.retain(|key, _value| {
-                        val.contains_key(key)
-                    });
+                    out.retain(|key, _value| val.contains_key(key));
                 }
             }
             std::fs::write(output_hashtab, serialize_hashtab(&out, None)).unwrap();

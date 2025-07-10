@@ -21,7 +21,9 @@ use crate::refcell_translation::{
     TranslatedTree,
 };
 use crate::slots::Slots;
-use crate::util::common_util::{parse_qml_from_chain, parse_qml_into_simple_object};
+use crate::util::common_util::{
+    add_error_source_if_needed, parse_qml_from_chain, parse_qml_into_simple_object,
+};
 
 use anyhow::{Error, Result};
 
@@ -41,15 +43,9 @@ pub fn find_and_process(
 ) -> Result<()> {
     for diff in diffs {
         match &diff.destination {
-            ObjectToChange::File(f) if f == file_name => match process(qml, diff, slots) {
-                Ok(_) => {}
-                Err(error) => {
-                    return Err(Error::msg(format!(
-                        "(On behalf of '{}'): {:?}",
-                        diff.source, error
-                    )))
-                }
-            },
+            ObjectToChange::File(f) if f == file_name => {
+                add_error_source_if_needed(process(qml, diff, slots), &diff.source)?
+            }
             _ => {}
         }
     }
@@ -1225,11 +1221,35 @@ pub fn process(absolute_root: &mut TranslatedTree, diff: &Change, slots: &mut Sl
                         "Cannot use import within TRAVERSE / SLOT statements!",
                     ));
                 }
-                absolute_root.leftovers.push(TreeElement::Import(Import {
-                    alias: import.alias.clone(),
-                    object_name: import.name.clone(),
-                    version: Some(import.version.clone()),
-                }));
+                // Have we imported it before?
+                if let Some(TreeElement::Import(existing_import)) =
+                    absolute_root.leftovers.iter_mut().find(|e| {
+                        if let TreeElement::Import(e) = e {
+                            e.object_name == import.name
+                        } else {
+                            false
+                        }
+                    })
+                {
+                    if existing_import.version.is_none() {
+                        // Force the version
+                        existing_import.version = Some(import.version.clone());
+                    }
+                    // We have. Is it the same alias / version?
+                    if existing_import.alias != import.alias
+                        || existing_import.version.as_ref().unwrap() != &import.version
+                    {
+                        // No - this is an error
+                        return Err(Error::msg(format!("Cannot import the same element ({}) with two different versions ({}, {}), or different aliases({:?}, {:?})", import.name, import.version, existing_import.version.as_ref().unwrap(), import.alias, existing_import.alias)));
+                    }
+                    // Yes, it's the same version. Do not duplicate it. Drop the redundant statement.
+                } else {
+                    absolute_root.leftovers.push(TreeElement::Import(Import {
+                        alias: import.alias.clone(),
+                        object_name: import.name.clone(),
+                        version: Some(import.version.clone()),
+                    }));
+                }
             }
             FileChangeAction::Rebuild(rebuild) => {
                 let root = unambiguous_root!();

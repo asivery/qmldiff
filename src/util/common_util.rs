@@ -18,6 +18,16 @@ use crate::{
     slots::Slots,
 };
 
+pub fn add_error_source_if_needed<T>(result: Result<T>, source: &str) -> Result<T> {
+    match result {
+        Ok(e) => Ok(e),
+        Err(error) => Err(Error::msg(format!(
+            "(On behalf of '{}'): {:?}",
+            source, error
+        ))),
+    }
+}
+
 pub fn filter_out_non_matching_versions(
     changes: &mut Vec<Change>,
     ver: Option<String>,

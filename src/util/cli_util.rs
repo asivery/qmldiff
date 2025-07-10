@@ -22,7 +22,9 @@ use crate::{
     processor::process,
     refcell_translation::{translate_from_root, untranslate_from_root},
     slots::Slots,
-    util::common_util::{filter_out_non_matching_versions, load_diff_file, parse_qml},
+    util::common_util::{
+        add_error_source_if_needed, filter_out_non_matching_versions, load_diff_file, parse_qml,
+    },
 };
 
 fn build_recursive_hashmap(directory: &String, dir_relative_name: &String, tab: &mut HashTab) {
@@ -284,12 +286,7 @@ pub fn apply_changes(
         };
         let mut tree = translate_from_root(parse_qml(file_contents, &file_to_edit, None, None)?);
         for change in changes {
-            if let Err(error) = process(&mut tree, change, slots) {
-                return Err(Error::msg(format!(
-                    "(On behalf of '{}'): {:?}",
-                    change.source, error
-                )));
-            }
+            add_error_source_if_needed(process(&mut tree, change, slots), &change.source)?;
         }
         // Rewrite the file in destination
         let destination_path = if flatten {
