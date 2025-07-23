@@ -44,8 +44,8 @@ impl From<SymbolicKeyword> for String {
     // These need to be space-terminated due to how parsing works.
     fn from(val: SymbolicKeyword) -> Self {
         String::from(match val {
-            SymbolicKeyword::InstanceOf => " instanceof ",
-            SymbolicKeyword::New => " new ",
+            SymbolicKeyword::InstanceOf => "instanceof",
+            SymbolicKeyword::New => "new",
         })
     }
 }
