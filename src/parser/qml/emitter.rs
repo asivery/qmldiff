@@ -70,7 +70,10 @@ fn emit_import(import: &Import) -> Line {
 
 fn emit_pragma(pragma: &Pragma) -> Line {
     Line {
-        text: format!("pragma {}", pragma.pragma),
+        text: match &pragma.value {
+            None => format!("pragma {}", pragma.pragma),
+            Some(x) => format!("pragma {}: {}", pragma.pragma, x),
+        },
         indent: 0,
     }
 }

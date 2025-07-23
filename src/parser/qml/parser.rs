@@ -67,6 +67,7 @@ pub struct EnumChild {
 #[derive(Debug, PartialEq, Eq)]
 pub struct Pragma {
     pub pragma: String,
+    pub value: Option<String>,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -299,8 +300,18 @@ impl Parser {
     fn parse_pragma_statement(&mut self) -> Result<Pragma> {
         self.discard_whitespace();
         let id = self.next_id(false)?;
-        let val = Pragma { pragma: id };
+        let mut val = Pragma { pragma: id, value: None };
         self.discard_whitespace();
+        match self.stream.peek() {
+            Some(TokenType::Symbol(';')) => {
+                self.stream.next();
+            },
+            Some(TokenType::Symbol(':')) => {
+                self.stream.next();
+                val.value = Some(self.next_id(true)?);
+            }
+            _ => {},
+        };
         if let Some(TokenType::Symbol(';')) = self.stream.peek() {
             self.stream.next();
         }
