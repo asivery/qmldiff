@@ -37,6 +37,7 @@ lazy_static! {
     static ref POST_INIT: Mutex<bool> = Mutex::new(false);
     static ref HASHTAB_RULES: Mutex<Option<HashRules>> = Mutex::new(None);
     static ref CURRENT_VERSION: Mutex<Option<String>> = Mutex::new(None);
+    static ref SLOTS_DISABLED: Mutex<bool> = Mutex::new(false);
 }
 
 #[no_mangle]
@@ -214,13 +215,32 @@ pub unsafe extern "C" fn qmldiff_is_modified(file_name: *const c_char) -> bool {
  * # Safety
  * no
  */
+pub unsafe extern "C" fn qmldiff_disable_slots_while_processing() {
+    *(SLOTS_DISABLED.lock().unwrap()) = true;
+}
+
+#[no_mangle]
+/**
+ * # Safety
+ * no
+ */
+pub unsafe extern "C" fn qmldiff_enable_slots_while_processing() {
+    *(SLOTS_DISABLED.lock().unwrap()) = false;
+}
+
+#[no_mangle]
+/**
+ * # Safety
+ * no
+ */
 pub unsafe extern "C" fn qmldiff_process_file(
     file_name: *const c_char,
     raw_contents: *const c_char,
     _contents_size: usize,
 ) -> *const c_char {
     let mut post_init = POST_INIT.lock().unwrap();
-    if !*post_init {
+    let are_slots_disabled = SLOTS_DISABLED.lock().unwrap().clone();
+    if !*post_init && !are_slots_disabled {
         eprintln!(
             "[qmldiff]: Was asked to process the first slot. Sealing slots, entering postinit..."
         );
@@ -245,7 +265,14 @@ pub unsafe extern "C" fn qmldiff_process_file(
     match tree {
         Ok(tree) => {
             let mut tree = translate_from_root(tree);
-            let slots = &mut SLOTS.lock().unwrap();
+
+            // Fake slots - when slots are disabled, use the always-empty set of slots in their stead.
+            let mut fake_slots = Slots::new();
+            let slots = if are_slots_disabled {
+                &mut fake_slots
+            } else {
+                &mut SLOTS.lock().unwrap()
+            };
             match find_and_process(&file_name, &mut tree, &changes, slots) {
                 Ok(()) => {
                     let raw_tree = untranslate_from_root(tree);
