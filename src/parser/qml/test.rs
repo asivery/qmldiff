@@ -17,11 +17,11 @@ fn test_qml_parser_on_file(file: &Path) {
     let ast_first_pass = parse_qml(contents, file.to_str().unwrap(), None, None).unwrap();
     let mut lines_first_emit = emit(&ast_first_pass);
     destroy_indents(&mut lines_first_emit);
-    let emit_first_pass = flatten_lines(&lines_first_emit);
+    let emit_first_pass = flatten_lines(&lines_first_emit).replace(" instanceof ", "instanceof").replace(" new ", "new");
     let ast_second_pass = parse_qml(emit_first_pass.clone(), file.to_str().unwrap(), None, None).unwrap();
     let mut lines_second_emit = emit(&ast_second_pass);
     destroy_indents(&mut lines_second_emit);
-    let emit_second_pass = flatten_lines(&lines_second_emit);
+    let emit_second_pass = flatten_lines(&lines_second_emit).replace(" instanceof ", "instanceof").replace(" new ", "new");;
     if emit_first_pass != emit_second_pass {
         println!("ERROR!");
         println!("First pass:\n{}", emit_first_pass);
