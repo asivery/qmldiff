@@ -9,7 +9,7 @@ use std::cell::RefCell;
 use std::mem::take;
 use std::rc::Rc;
 
-type TranslatedEnumChildValues = Rc<RefCell<Vec<(String, Option<u64>)>>>;
+type TranslatedEnumChildValues = Rc<RefCell<Vec<(String, Option<String>)>>>;
 
 #[derive(Debug, Clone)]
 pub struct TranslatedEnumChild {

@@ -129,7 +129,7 @@ pub enum TokenType {
     Keyword(Keyword),
     SymbolicKeyword(SymbolicKeyword),
     Identifier(String),
-    Number(u64),
+    Number(String), // Numbers are stored as strings, so as to avoid any possible loss of precision when dealing with parsing / reemission.
     String(String),
     Symbol(char),
     Comment(String),
@@ -278,9 +278,9 @@ impl Lexer {
                 }
 
                 c if c.is_ascii_digit() => {
-                    let num_str = self.stream.collect_while(|_, c| c.is_ascii_digit().into());
-                    let number = num_str.parse::<u64>().unwrap();
-                    Ok(TokenType::Number(number))
+                    // Allow multiple dots in the number for simplicity's sake
+                    let num_str = self.stream.collect_while(|_, c| (c.is_ascii_digit() || c == '.').into());
+                    Ok(TokenType::Number(num_str))
                 }
 
                 c if c.is_alphabetic() || c == '_' => {

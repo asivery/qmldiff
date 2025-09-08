@@ -190,9 +190,9 @@ fn _emit_object_to_token_stream(object: &Object, stream: &mut Vec<TokenType>, on
                 nl!();
                 for val in &r#enum.values {
                     id!(val.0.clone());
-                    if let Some(value) = val.1 {
+                    if let Some(value) = &val.1 {
                         add!(TokenType::Symbol('='));
-                        add!(TokenType::Number(value));
+                        add!(TokenType::Number(value.clone()));
                     }
                     nl!();
                 }
@@ -308,7 +308,7 @@ pub fn emit_object(object: &Object, indent: usize) -> Vec<Line> {
                 });
                 let length = r#enum.values.len();
                 for (i, val) in r#enum.values.iter().enumerate() {
-                    let mut text = if let Some(value) = val.1 {
+                    let mut text = if let Some(ref value) = val.1 {
                         format!("{} = {}", val.0, value)
                     } else {
                         val.0.to_string()

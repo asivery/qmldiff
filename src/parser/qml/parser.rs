@@ -61,7 +61,7 @@ pub struct FunctionChild {
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct EnumChild {
     pub name: String,
-    pub values: Vec<(String, Option<u64>)>,
+    pub values: Vec<(String, Option<String>)>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -335,8 +335,11 @@ impl Parser {
             _ => return error_received_expected!(self.stream.peek(), "Valid import source"),
         };
         self.discard_whitespace();
-        let version = if let Some(TokenType::Number(_)) = self.stream.peek() {
-            Some(self.build_delimeted_name('.', discriminant(&TokenType::Number(0)), false)?)
+        // Numbers are allowed to have multiple dots.
+        let version = if let Some(TokenType::Number(version)) = self.stream.peek() {
+            let value = version.clone();
+            self.stream.next();
+            Some(value)
         } else {
             None
         };
