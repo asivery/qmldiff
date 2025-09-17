@@ -580,7 +580,11 @@ fn execute_rebuild_steps(
             },
             RebuildInstruction::Insert(insert) => {
                 unambiguous_position!();
-                main_body_stream.splice(position..position, insert.clone());
+                let mut new_stream = insert.clone();
+                // Never allow the concatenation of new tokens into the ends of previous!
+                new_stream.insert(0, TokenType::Whitespace(" ".to_string()));
+                new_stream.push(TokenType::Whitespace(" ".to_string()));
+                main_body_stream.splice(position..position, new_stream);
                 position += insert.len();
             }
             RebuildInstruction::Locate(locate) => match &locate.selector {
