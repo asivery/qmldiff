@@ -91,8 +91,15 @@ fn update_hashtab(hashtab: &mut HashTab, qml_obj: &Object) {
 
 pub fn update_hashtab_from_tree(qml: &QMLTree, hashtab: &mut HashTab) {
     for root_child in qml {
-        if let TreeElement::Object(obj) = root_child {
-            update_hashtab(hashtab, obj)
+        match root_child {
+            TreeElement::Object(obj) => update_hashtab(hashtab, obj),
+            TreeElement::Import(import) => {
+                hashtab.insert(hash(&import.object_name), import.object_name.clone());
+                if let Some(ref alias) = import.alias {
+                    hashtab.insert(hash(&alias), alias.clone());
+                }
+            },
+            TreeElement::Pragma(_) => {} // Pragmas can't be hashed.
         }
     }
 }
