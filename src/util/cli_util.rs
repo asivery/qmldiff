@@ -1,6 +1,6 @@
 use anyhow::{Error, Result};
 use std::{
-    collections::BTreeMap,
+    collections::HashSet,
     fs::{create_dir_all, read_dir, read_to_string, write},
     path::Path,
 };
@@ -17,13 +17,12 @@ use crate::{
             lexer::TokenType,
             parser::{Change, ObjectToChange},
         },
-        qml::{self, emitter::emit_string, hash_extension::qml_hash_remap},
+        qml::{self, hash_extension::qml_hash_remap},
     },
-    processor::process,
-    refcell_translation::{translate_from_root, untranslate_from_root},
+    processor::find_and_process,
     slots::Slots,
     util::common_util::{
-        add_error_source_if_needed, filter_out_non_matching_versions, load_diff_file, parse_qml,
+        filter_out_non_matching_versions, load_diff_file, parse_qml, tokenize_qml,
     },
 };
 
@@ -254,24 +253,19 @@ pub fn apply_changes(
     slots: &mut Slots,
     changes: &Vec<Change>,
 ) -> Result<()> {
-    let mut set: BTreeMap<String, Vec<&Change>> = BTreeMap::new();
-    for f in changes {
-        match &f.destination {
-            diff::parser::ObjectToChange::File(f) => set.insert(
-                f.clone(),
-                changes
-                    .iter()
-                    .filter(|e| e.destination == ObjectToChange::File(f.to_string()))
-                    .collect::<Vec<&Change>>(),
-            ),
-            _ => return Err(Error::msg("Invalid state. Please run process_slots()")),
-        };
-    }
+    let file_set = changes
+        .iter()
+        .filter_map(|e| match &e.destination {
+            ObjectToChange::File(f) | ObjectToChange::FileTokenStream(f) => Some(f.clone()),
+            _ => None,
+        })
+        .collect::<HashSet<String>>();
+
     let mut file_iterator = 0u32;
     let absolute_root = Path::new(qml_destination_path);
     let source_root = Path::new(qml_root_path);
 
-    for (ref file_to_edit, changes) in set.iter() {
+    for file_to_edit in file_set.iter() {
         // Open the file.
         let file_contents = match read_to_string(
             source_root.join(file_to_edit.strip_prefix('/').unwrap_or(file_to_edit)),
@@ -284,10 +278,9 @@ pub fn apply_changes(
                 )))
             }
         };
-        let mut tree = translate_from_root(parse_qml(file_contents, &file_to_edit, None, None)?);
-        for change in changes {
-            add_error_source_if_needed(process(&mut tree, change, slots), &change.source)?;
-        }
+        let tree = tokenize_qml(file_contents, &file_to_edit, None, None);
+        let (emitted, count) = find_and_process(file_to_edit, tree, changes, slots)?;
+
         // Rewrite the file in destination
         let destination_path = if flatten {
             let next = format!(
@@ -304,13 +297,12 @@ pub fn apply_changes(
             let next = Path::new(&file_to_edit);
             absolute_root.join(next.strip_prefix("/").unwrap_or(next))
         };
-        let raw = untranslate_from_root(tree);
         create_dir_all(destination_path.parent().unwrap())?;
-        write(&destination_path, emit_string(&raw))?;
+        write(&destination_path, emitted)?;
         println!(
             "Written file {} - {} diff(s) applied.",
             destination_path.to_string_lossy(),
-            changes.len()
+            count
         );
     }
 

@@ -19,6 +19,20 @@ AFFECT /qml/TestQML.qml
 END AFFECT
 ```
 
+If the file you're trying to patch is not a QML file, use the `AFFECT REBUILD` instruction.
+
+Example:
+```
+AFFECT REBUILD /data/example.json
+    ; REBUILD instructions go here
+    LOCATE { "foo" }
+    REMOVE LOCATED
+    INSERT { "bar" }
+; Important: Use 'END REBUILD' here - not 'END AFFECT!'
+END REBUILD
+```
+
+
 Alternatively, you can add data to a `SLOT`. `SLOT`s' contents will be written to the final re-emitted QML in place of `INSERT SLOT <slot>`, or QML `~{slot}~` statements.
 
 Example:

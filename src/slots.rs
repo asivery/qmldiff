@@ -31,6 +31,7 @@ impl Slots {
     pub fn update_slots(&mut self, changes: &mut Vec<Change>) {
         changes.retain(|e| match &e.destination {
             ObjectToChange::File(_) => true,
+            ObjectToChange::FileTokenStream(_) => true,
             ObjectToChange::Template(slot_name) | ObjectToChange::Slot(slot_name) => {
                 let mut created = false;
                 if !self.0.contains_key(slot_name) {

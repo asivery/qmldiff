@@ -95,12 +95,12 @@ pub fn parse_diff(
     parser.parse(None)
 }
 
-pub fn parse_qml(
+pub fn tokenize_qml(
     raw_qml: String,
     qml_name: &str,
     hashtab: Option<&HashTab>,
     slots: Option<&mut Slots>,
-) -> Result<Vec<TreeElement>> {
+) -> Vec<TokenType> {
     let mut iterator = IteratorPipeline::new(
         Box::from(Lexer::new(StringCharacterTokenizer::new(raw_qml))),
         qml_name,
@@ -117,8 +117,18 @@ pub fn parse_qml(
         iterator.add_remapper(&mut slot_mapper);
     }
 
-    let mut parser: qml::parser::Parser =
-        qml::parser::Parser::new(Box::new(iterator.collect::<Vec<_>>().into_iter()));
+    iterator.collect::<Vec<_>>()
+}
+
+pub fn parse_qml(
+    raw_qml: String,
+    qml_name: &str,
+    hashtab: Option<&HashTab>,
+    slots: Option<&mut Slots>,
+) -> Result<Vec<TreeElement>> {
+    let mut parser: qml::parser::Parser = qml::parser::Parser::new(Box::new(
+        tokenize_qml(raw_qml, qml_name, hashtab, slots).into_iter(),
+    ));
     parser.parse()
 }
 

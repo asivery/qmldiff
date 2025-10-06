@@ -4,9 +4,7 @@ use hashtab::{merge_hash_file, serialize_hashtab, HashTab};
 use lazy_static::lazy_static;
 use lib_util::{include_if_building_hashtab, is_building_hashtab};
 use parser::diff::parser::{Change, ObjectToChange};
-use parser::qml::emitter::emit_string;
 use processor::find_and_process;
-use refcell_translation::{translate_from_root, untranslate_from_root};
 use slots::Slots;
 use std::ops::Deref;
 use std::time::Duration;
@@ -14,9 +12,9 @@ use std::{
     ffi::{c_char, CStr, CString},
     sync::Mutex,
 };
-use util::common_util::{load_diff_file, parse_diff, parse_qml};
+use util::common_util::{load_diff_file, parse_diff};
 
-use crate::util::common_util::filter_out_non_matching_versions;
+use crate::util::common_util::{filter_out_non_matching_versions, tokenize_qml};
 
 mod hash;
 mod hashrules;
@@ -260,33 +258,27 @@ pub unsafe extern "C" fn qmldiff_process_file(
     // It is modified.
     // Build the tree.
     let contents: String = CStr::from_ptr(raw_contents).to_str().unwrap().into();
-    let tree = parse_qml(contents, &file_name, None, None);
+    let tree = tokenize_qml(contents, &file_name, None, None);
     eprintln!("[qmldiff]: Processing file {}...", &file_name);
-    match tree {
-        Ok(tree) => {
-            let mut tree = translate_from_root(tree);
-
-            // Fake slots - when slots are disabled, use the always-empty set of slots in their stead.
-            let mut fake_slots = Slots::new();
-            let slots = if are_slots_disabled {
-                &mut fake_slots
-            } else {
-                &mut SLOTS.lock().unwrap()
-            };
-            match find_and_process(&file_name, &mut tree, &changes, slots) {
-                Ok(()) => {
-                    let raw_tree = untranslate_from_root(tree);
-                    let emitted_string = CString::new(emit_string(&raw_tree).as_str()).unwrap();
-                    let ret = emitted_string.as_ptr();
-                    std::mem::forget(emitted_string);
-                    return ret;
-                }
-                Err(e) => eprintln!("[qmldiff]: Error while processing file tree: {:?}", e),
-            }
+    // Fake slots - when slots are disabled, use the always-empty set of slots in their stead.
+    let mut fake_slots = Slots::new();
+    let slots = if are_slots_disabled {
+        &mut fake_slots
+    } else {
+        &mut SLOTS.lock().unwrap()
+    };
+    match find_and_process(&file_name, tree, &changes, slots) {
+        Ok((emitted, _count)) => {
+            let emitted_string = CString::new(emitted).unwrap();
+            let ret = emitted_string.as_ptr();
+            std::mem::forget(emitted_string);
+            ret
         }
-        Err(e) => eprintln!("[qmldiff]: Error while parsing file tree: {:?}", e),
+        Err(e) => {
+            eprintln!("[qmldiff]: Error while processing file tree: {:?}", e);
+            std::ptr::null()
+        }
     }
-    std::ptr::null()
 }
 
 #[no_mangle]

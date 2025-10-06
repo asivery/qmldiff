@@ -11,21 +11,23 @@ use crate::parser::diff::parser::{
     ReplaceRebuildActionWhat,
 };
 use crate::parser::diff::parser::{NodeSelector, NodeTree, PropRequirement};
-use crate::parser::qml::emitter::emit_object_to_token_stream;
+use crate::parser::qml::emitter::{
+    emit_object_to_token_stream, emit_string, emit_token_stream, flatten_lines,
+};
 use crate::parser::qml::lexer::TokenType;
 use crate::parser::qml::parser::{AssignmentChildValue, Import, Object, ObjectChild, TreeElement};
 use crate::parser::qml::slot_extensions::QMLSlotRemapper;
 use crate::refcell_translation::{
-    translate, translate_object_child, untranslate, untranslate_object_child, TranslatedEnumChild,
-    TranslatedObject, TranslatedObjectAssignmentChild, TranslatedObjectChild, TranslatedObjectRef,
-    TranslatedTree,
+    translate, translate_from_root, translate_object_child, untranslate, untranslate_from_root,
+    untranslate_object_child, TranslatedEnumChild, TranslatedObject,
+    TranslatedObjectAssignmentChild, TranslatedObjectChild, TranslatedObjectRef, TranslatedTree,
 };
 use crate::slots::Slots;
 use crate::util::common_util::{
     add_error_source_if_needed, parse_qml_from_chain, parse_qml_into_simple_object,
 };
 
-use anyhow::{Error, Result};
+use anyhow::{bail, Error, Result};
 
 use crate::parser::diff::parser::Change;
 
@@ -37,20 +39,50 @@ macro_rules! traverse_no_raw_children {
 
 pub fn find_and_process(
     file_name: &str,
-    qml: &mut TranslatedTree,
+    mut token_stream: Vec<TokenType>,
     diffs: &Vec<Change>,
     slots: &mut Slots,
-) -> Result<()> {
+) -> Result<(String, usize)> {
+    let mut qml: Option<TranslatedTree> = None;
+    let mut count = 0;
     for diff in diffs {
         match &diff.destination {
             ObjectToChange::File(f) if f == file_name => {
-                add_error_source_if_needed(process(qml, diff, slots), &diff.source)?
+                if qml.is_none() {
+                    qml = Some(translate_from_root(parse_qml_from_chain(take(
+                        &mut token_stream,
+                    ))?));
+                }
+                count += 1;
+                add_error_source_if_needed(
+                    process(qml.as_mut().unwrap(), diff, slots),
+                    &diff.source,
+                )?
+            }
+            ObjectToChange::FileTokenStream(f) if f == file_name => {
+                count += 1;
+                if qml.is_some() {
+                    bail!("Cannot ALTER REBUILD a file which has been ALTERed before");
+                }
+                let rebuild_instructions = if let FileChangeAction::Rebuild(r) = &diff.changes[0] {
+                    r
+                } else {
+                    unreachable!()
+                };
+                add_error_source_if_needed(
+                    execute_rebuild_steps(rebuild_instructions, &mut None, &mut token_stream),
+                    &diff.source,
+                )?;
             }
             _ => {}
         }
     }
 
-    Ok(())
+    if let Some(qml) = qml {
+        Ok((emit_string(&untranslate_from_root(qml)), count))
+    } else {
+        Ok((flatten_lines(&emit_token_stream(&token_stream, 0)), count))
+    }
 }
 
 fn does_match(
@@ -517,7 +549,7 @@ fn find_substream_in_stream(
 
 fn execute_rebuild_steps(
     rebuild_instructions: &RebuildAction,
-    arguments: &mut Option<Vec<String>>,
+    func_arguments: &mut Option<Vec<String>>,
     main_body_stream: &mut Vec<TokenType>,
 ) -> Result<()> {
     let mut position = usize::MAX;
@@ -541,7 +573,7 @@ fn execute_rebuild_steps(
         }
 
         match instr {
-            RebuildInstruction::InsertArgument(arg) => match arguments {
+            RebuildInstruction::InsertArgument(arg) => match func_arguments {
                 Some(ref mut arguments) => {
                     if arg.position > arguments.len() {
                         return Err(Error::msg(format!("Cannot insert the argument {} at position {} - there are only {} elements", arg.name, arg.position, arguments.len())));
@@ -550,7 +582,7 @@ fn execute_rebuild_steps(
                 }
                 None => not_functional_error!(),
             },
-            RebuildInstruction::RemoveArgument(arg) => match arguments {
+            RebuildInstruction::RemoveArgument(arg) => match func_arguments {
                 Some(ref mut arguments) => {
                     if arg.position >= arguments.len()
                         || arguments.get(arg.position) != Some(&arg.name)
@@ -564,7 +596,7 @@ fn execute_rebuild_steps(
                 }
                 None => not_functional_error!(),
             },
-            RebuildInstruction::RenameArgument(arg, new_name) => match arguments {
+            RebuildInstruction::RenameArgument(arg, new_name) => match func_arguments {
                 Some(ref mut arguments) => {
                     if arg.position >= arguments.len()
                         || arguments.get(arg.position) != Some(&arg.name)
@@ -936,7 +968,7 @@ fn rebuild_child(
     Ok(())
 }
 
-pub fn process(absolute_root: &mut TranslatedTree, diff: &Change, slots: &mut Slots) -> Result<()> {
+fn process(absolute_root: &mut TranslatedTree, diff: &Change, slots: &mut Slots) -> Result<()> {
     let mut root_stack: Vec<RootReference> = Vec::new();
     let mut current_root = RootReference {
         root: vec![TreeRoot::Object(absolute_root.root.clone())],

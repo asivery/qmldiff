@@ -145,6 +145,7 @@ pub enum FileChangeAction {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ObjectToChange {
+    FileTokenStream(String),
     File(String),
     Template(String),
     Slot(String),
@@ -913,8 +914,25 @@ impl<'a> Parser<'a> {
                     }
                     TokenType::Keyword(Keyword::Affect) => {
                         has_seen_non_version_statements = true;
-                        current_working_file =
-                            Some(ObjectToChange::File(self.next_string_or_id()?));
+                        self.discard_whitespace();
+                        if let Some(TokenType::Keyword(Keyword::Rebuild)) = self.stream.peek() {
+                            let _ = self.next_lex();
+                            let file_to_change = ObjectToChange::FileTokenStream(self.next_string_or_id()?);
+                            output.push(Change {
+                                source: self.source_name.clone(),
+                                changes: vec![FileChangeAction::Rebuild(RebuildAction {
+                                    selector: NodeSelector { object_name: "root".to_string(), named: None, props: Default::default() },
+                                    redefine: false,
+                                    actions: self.read_rebuild_instructions(false)?,
+                                })],
+                                destination: file_to_change,
+                                versions_allowed: versions_allowed.clone()
+                            });
+                            continue;
+                        } else {
+                            current_working_file =
+                                Some(ObjectToChange::File(self.next_string_or_id()?));
+                        }
                         in_slot = false;
                     }
                     TokenType::Keyword(Keyword::Template) => {
