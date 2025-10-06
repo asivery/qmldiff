@@ -300,17 +300,20 @@ impl Parser {
     fn parse_pragma_statement(&mut self) -> Result<Pragma> {
         self.discard_whitespace();
         let id = self.next_id(false)?;
-        let mut val = Pragma { pragma: id, value: None };
+        let mut val = Pragma {
+            pragma: id,
+            value: None,
+        };
         self.discard_whitespace();
         match self.stream.peek() {
             Some(TokenType::Symbol(';')) => {
                 self.stream.next();
-            },
+            }
             Some(TokenType::Symbol(':')) => {
                 self.stream.next();
                 val.value = Some(self.next_id(true)?);
             }
-            _ => {},
+            _ => {}
         };
         if let Some(TokenType::Symbol(';')) = self.stream.peek() {
             self.stream.next();

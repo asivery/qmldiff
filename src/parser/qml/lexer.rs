@@ -279,7 +279,9 @@ impl Lexer {
 
                 c if c.is_ascii_digit() => {
                     // Allow multiple dots in the number for simplicity's sake
-                    let num_str = self.stream.collect_while(|_, c| (c.is_ascii_digit() || c == '.').into());
+                    let num_str = self
+                        .stream
+                        .collect_while(|_, c| (c.is_ascii_digit() || c == '.').into());
                     Ok(TokenType::Number(num_str))
                 }
 

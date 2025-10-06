@@ -98,7 +98,7 @@ pub fn update_hashtab_from_tree(qml: &QMLTree, hashtab: &mut HashTab) {
                 if let Some(ref alias) = import.alias {
                     hashtab.insert(hash(&alias), alias.clone());
                 }
-            },
+            }
             TreeElement::Pragma(_) => {} // Pragmas can't be hashed.
         }
     }
