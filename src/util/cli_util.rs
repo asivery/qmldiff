@@ -15,7 +15,7 @@ use crate::{
             emitter::emit_token_stream,
             hash_processor::diff_hash_remapper,
             lexer::TokenType,
-            parser::{Change, ObjectToChange},
+            parser::{Change, ExternalLoader, ObjectToChange},
         },
         qml::{self, hash_extension::qml_hash_remap},
     },
@@ -200,6 +200,13 @@ fn process_single_diff(
     }
 }
 
+struct LoggingExternalLoader {}
+impl ExternalLoader for LoggingExternalLoader {
+    fn load_external(&mut self, file: &str) {
+        println!("QMD tried to load external {file}")
+    }
+}
+
 pub fn build_change_structures(
     files: &Vec<String>,
     hashtab: &HashTab,
@@ -215,7 +222,12 @@ pub fn build_change_structures(
         if path.is_file() {
             let root_dir = String::from(path.parent().unwrap().to_string_lossy());
             println!("Reading diff {}...", path.to_string_lossy());
-            let mut this_diff = load_diff_file(Some(root_dir), path, hashtab)?;
+            let mut this_diff = load_diff_file(
+                Some(root_dir),
+                path,
+                hashtab,
+                Some(Box::new(LoggingExternalLoader {})),
+            )?;
             filter_out_non_matching_versions(
                 &mut this_diff,
                 version.clone(),
@@ -230,8 +242,12 @@ pub fn build_change_structures(
                     continue;
                 }
                 println!("Reading diff {}...", sub_file_path.to_string_lossy());
-                let mut this_diff =
-                    load_diff_file(Some(path_str.clone()), &sub_file_path, hashtab)?;
+                let mut this_diff = load_diff_file(
+                    Some(path_str.clone()),
+                    &sub_file_path,
+                    hashtab,
+                    Some(Box::new(LoggingExternalLoader {})),
+                )?;
                 filter_out_non_matching_versions(
                     &mut this_diff,
                     version.clone(),

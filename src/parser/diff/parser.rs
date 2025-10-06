@@ -1,19 +1,32 @@
-use std::{collections::HashMap, iter::Peekable, mem::take, path::Path, sync::Arc};
+use std::{
+    cell::RefCell,
+    collections::HashMap,
+    iter::Peekable,
+    mem::take,
+    path::{Path, PathBuf},
+    rc::Rc,
+    sync::Arc,
+};
 
 use crate::{
     error_received_expected,
     hashtab::HashTab,
     parser::{common::StringCharacterTokenizer, diff::hash_processor::diff_hash_remapper, qml},
 };
-use anyhow::{Error, Result};
+use anyhow::{bail, Error, Result};
 
 use super::lexer::{Keyword, Lexer, TokenType};
+
+pub trait ExternalLoader {
+    fn load_external(&mut self, file: &str);
+}
 
 pub struct Parser<'a> {
     source_name: Arc<String>,
     stream: Peekable<Box<dyn Iterator<Item = TokenType>>>,
     root_path: Option<String>,
     hashtab: Option<&'a HashTab>,
+    external_loader: Option<Rc<RefCell<Box<dyn ExternalLoader>>>>,
 }
 
 #[derive(Debug, Clone)]
@@ -396,6 +409,7 @@ impl<'a> Parser<'a> {
                     | Keyword::Multiple
                     | Keyword::Slot
                     | Keyword::Load
+                    | Keyword::External
                     | Keyword::With
                     | Keyword::To
                     | Keyword::All
@@ -692,6 +706,7 @@ impl<'a> Parser<'a> {
                 | Keyword::Template
                 | Keyword::Before
                 | Keyword::Load
+                | Keyword::External
                 | Keyword::To
                 | Keyword::Slot
                 | Keyword::With
@@ -776,56 +791,76 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn load_from(
-        &mut self,
-        file: &str,
-        output: &mut Vec<Change>,
-        versions_allowed: Option<Vec<String>>,
-    ) -> Result<()> {
+    fn get_full_path_and_root_of(&'a self, file: &str) -> Result<(&'a str, PathBuf)> {
         if let Some(ref root) = self.root_path {
             let new_path = Path::new(file);
             if new_path.is_absolute() {
                 return Err(Error::msg("Cannot load files using absolute paths!"));
             }
             let full_path = Path::new(root).join(new_path.strip_prefix("/").unwrap_or(new_path));
-            let file_contents = match std::fs::read_to_string(&full_path) {
-                Ok(e) => e,
-                Err(_) => {
-                    return Err(Error::msg(format!(
-                        "Cannot read file {}",
-                        full_path.to_string_lossy()
-                    )))
-                }
-            };
-            let moved_root = if let Some(e) = Path::new(file).parent() {
-                String::from(Path::new(root).join(e).to_string_lossy())
-            } else {
-                root.clone()
-            };
-            let mut parser = Self::new(
-                Box::new({
-                    if let Some(hashtab) = self.hashtab {
-                        Lexer::new(StringCharacterTokenizer::new(file_contents))
-                            .map(|e| {
-                                diff_hash_remapper(hashtab, e, &full_path.to_string_lossy())
-                                    .unwrap()
-                            })
-                            .collect::<Vec<TokenType>>()
-                    } else {
-                        Lexer::new(StringCharacterTokenizer::new(file_contents))
-                            .collect::<Vec<TokenType>>()
-                    }
-                    .into_iter()
-                }),
-                Some(moved_root),
-                Arc::from(full_path.to_string_lossy().to_string()),
-                self.hashtab,
-            );
-            output.extend(parser.parse(versions_allowed.clone())?);
-            Ok(())
+            Ok((root, full_path))
         } else {
             Err(Error::msg("Cannot load a file if no root path set!"))
         }
+    }
+
+    fn load_external(&mut self, file: &str) -> Result<()> {
+        let (_, file) = self.get_full_path_and_root_of(file)?;
+        if let Some(external_handler) = &self.external_loader {
+            external_handler
+                .borrow_mut()
+                .load_external(&file.to_string_lossy());
+            Ok(())
+        } else {
+            bail!(
+                "Cannot load external {} - no external loader supported!",
+                file.display()
+            );
+        }
+    }
+
+    fn load_from(
+        &mut self,
+        file: &str,
+        output: &mut Vec<Change>,
+        versions_allowed: Option<Vec<String>>,
+    ) -> Result<()> {
+        let (root, full_path) = self.get_full_path_and_root_of(file)?;
+        let file_contents = match std::fs::read_to_string(&full_path) {
+            Ok(e) => e,
+            Err(_) => {
+                return Err(Error::msg(format!(
+                    "Cannot read file {}",
+                    full_path.to_string_lossy()
+                )))
+            }
+        };
+        let moved_root = if let Some(e) = Path::new(file).parent() {
+            String::from(Path::new(root).join(e).to_string_lossy())
+        } else {
+            root.to_string()
+        };
+        let mut parser = Self::new(
+            Box::new({
+                if let Some(hashtab) = self.hashtab {
+                    Lexer::new(StringCharacterTokenizer::new(file_contents))
+                        .map(|e| {
+                            diff_hash_remapper(hashtab, e, &full_path.to_string_lossy()).unwrap()
+                        })
+                        .collect::<Vec<TokenType>>()
+                } else {
+                    Lexer::new(StringCharacterTokenizer::new(file_contents))
+                        .collect::<Vec<TokenType>>()
+                }
+                .into_iter()
+            }),
+            Some(moved_root),
+            Arc::from(full_path.to_string_lossy().to_string()),
+            self.hashtab,
+            self.external_loader.clone(),
+        );
+        output.extend(parser.parse(versions_allowed.clone())?);
+        Ok(())
     }
 
     pub fn parse(&mut self, parent_versions_allowed: Option<Vec<String>>) -> Result<Vec<Change>> {
@@ -964,8 +999,15 @@ impl<'a> Parser<'a> {
                     }
                     TokenType::Keyword(Keyword::Load) => {
                         has_seen_non_version_statements = true;
-                        let path = self.read_path()?;
-                        self.load_from(&path, &mut output, versions_allowed.clone())?;
+                        self.discard_whitespace();
+                        if let Some(TokenType::Keyword(Keyword::External)) = self.stream.peek() {
+                            let _ = self.next_lex();
+                            let path = self.read_path()?;
+                            self.load_external(&path)?;
+                        } else {
+                            let path = self.read_path()?;
+                            self.load_from(&path, &mut output, versions_allowed.clone())?;
+                        }
                     }
 
                     _ => {
@@ -995,12 +1037,14 @@ impl<'a> Parser<'a> {
         root_path: Option<String>,
         source_name: Arc<String>,
         hashtab: Option<&'a HashTab>,
+        external_loader: Option<Rc<RefCell<Box<dyn ExternalLoader>>>>,
     ) -> Parser<'a> {
         Parser {
             source_name,
             stream: token_stream.peekable(),
             root_path,
             hashtab,
+            external_loader,
         }
     }
 }

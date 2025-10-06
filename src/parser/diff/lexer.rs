@@ -24,6 +24,7 @@ pub enum Keyword {
     End,
     Slot,
     Load,
+    External,
     Version,
 
     With,
@@ -51,6 +52,7 @@ impl Display for Keyword {
             Self::Before => "BEFORE",
             Self::Rename => "RENAME",
             Self::Load => "LOAD",
+            Self::External => "EXTERNAL",
             Self::End => "END",
             Self::Import => "IMPORT",
             Self::Insert => "INSERT",
@@ -91,6 +93,7 @@ impl TryFrom<&str> for Keyword {
             "IMPORT" => Ok(Self::Import),
             "RENAME" => Ok(Self::Rename),
             "LOAD" => Ok(Self::Load),
+            "EXTERNAL" => Ok(Self::External),
             "ALL" => Ok(Self::All),
             "BEFORE" => Ok(Self::Before),
             "AFTER" => Ok(Self::After),

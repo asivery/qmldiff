@@ -1,4 +1,4 @@
-use std::{fs::read_to_string, path::Path, sync::Arc};
+use std::{cell::RefCell, fs::read_to_string, path::Path, rc::Rc, sync::Arc};
 
 use anyhow::{Error, Result};
 
@@ -6,7 +6,11 @@ use crate::{
     hashtab::HashTab,
     parser::{
         common::{IteratorPipeline, StringCharacterTokenizer},
-        diff::{self, hash_processor::diff_hash_remapper, parser::Change},
+        diff::{
+            self,
+            hash_processor::diff_hash_remapper,
+            parser::{Change, ExternalLoader},
+        },
         qml::{
             self,
             hash_extension::QMLHashRemapper,
@@ -62,6 +66,7 @@ pub fn load_diff_file<P>(
     root_dir: Option<String>,
     file_path: P,
     hashtab: &HashTab,
+    external_loader: Option<Box<dyn ExternalLoader>>,
 ) -> Result<Vec<Change>>
 where
     P: AsRef<Path>,
@@ -72,6 +77,7 @@ where
         contents,
         &file_path.as_ref().to_string_lossy(),
         hashtab,
+        external_loader,
     )
 }
 
@@ -80,6 +86,7 @@ pub fn parse_diff(
     contents: String,
     diff_name: &str,
     hashtab: &HashTab,
+    external_loader: Option<Box<dyn ExternalLoader>>,
 ) -> Result<Vec<Change>> {
     let lexer = diff::lexer::Lexer::new(StringCharacterTokenizer::new(contents));
     let tokens: Vec<diff::lexer::TokenType> = lexer
@@ -90,6 +97,7 @@ pub fn parse_diff(
         root_dir,
         Arc::from(diff_name.to_string()),
         Some(hashtab),
+        external_loader.map(|e| Rc::new(RefCell::new(e))),
     );
 
     parser.parse(None)

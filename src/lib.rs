@@ -7,6 +7,7 @@ use parser::diff::parser::{Change, ObjectToChange};
 use processor::find_and_process;
 use slots::Slots;
 use std::ops::Deref;
+use std::os::raw::c_void;
 use std::time::Duration;
 use std::{
     ffi::{c_char, CStr, CString},
@@ -14,6 +15,7 @@ use std::{
 };
 use util::common_util::{load_diff_file, parse_diff};
 
+use crate::parser::diff::parser::ExternalLoader;
 use crate::util::common_util::{filter_out_non_matching_versions, tokenize_qml};
 
 mod hash;
@@ -28,6 +30,8 @@ mod slots;
 mod lib_util;
 mod util;
 
+type CExternalLoaderFunc = unsafe extern "C" fn(file_name: *const c_char) -> c_void;
+
 lazy_static! {
     static ref HASHTAB: Mutex<HashTab> = Mutex::new(HashTab::new());
     static ref SLOTS: Mutex<Slots> = Mutex::new(Slots::new());
@@ -36,6 +40,12 @@ lazy_static! {
     static ref HASHTAB_RULES: Mutex<Option<HashRules>> = Mutex::new(None);
     static ref CURRENT_VERSION: Mutex<Option<String>> = Mutex::new(None);
     static ref SLOTS_DISABLED: Mutex<bool> = Mutex::new(false);
+    static ref EXTERNAL_LOADER: Mutex<Option<CExternalLoaderFunc>> = Mutex::new(None);
+}
+
+#[no_mangle]
+unsafe extern "C" fn qmldiff_set_external_loader(external_loader: CExternalLoaderFunc) {
+    *EXTERNAL_LOADER.lock().unwrap() = Some(external_loader);
 }
 
 #[no_mangle]
@@ -90,6 +100,7 @@ extern "C" fn qmldiff_add_external_diff(
         change_file_contents,
         &file_identifier,
         &HASHTAB.lock().unwrap(),
+        None,
     ) {
         Err(problem) => {
             eprintln!(
@@ -126,6 +137,15 @@ fn load_hashtab(root_dir: &str) {
             "[qmldiff]: Hashtab loaded! Cached {} entries",
             hashtab.len()
         );
+    }
+}
+
+impl ExternalLoader for CExternalLoaderFunc {
+    fn load_external(&mut self, file: &str) {
+        let c_string = CString::new(file).unwrap();
+        unsafe {
+            self(c_string.as_ptr());
+        }
     }
 }
 
@@ -166,7 +186,15 @@ extern "C" fn qmldiff_build_change_files(root_dir: *const c_char) -> i32 {
                 None => 0,
             };
             eprintln!("[qmldiff]: Loading file {}", &file[fname_start..]);
-            match load_diff_file(Some(root_dir.clone()), file, &HASHTAB.lock().unwrap()) {
+            match load_diff_file(
+                Some(root_dir.clone()),
+                file,
+                &HASHTAB.lock().unwrap(),
+                EXTERNAL_LOADER
+                    .lock()
+                    .unwrap()
+                    .map(|e| Box::new(e) as Box<dyn ExternalLoader>),
+            ) {
                 Err(problem) => {
                     eprintln!("[qmldiff]: Failed to load file {}: {:?}", file, problem)
                 }

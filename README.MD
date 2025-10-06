@@ -78,7 +78,11 @@ the current root. Because of that, every traverse block needs to be terminated w
 
 #### `LOAD <file_path>`
 
-The load statements loads the file with the path given as a QMLDiff file.
+The load statement loads the file with the path given as a QMLDiff file.
+
+#### `LOAD EXTERNAL <file_path>`
+
+Loading of external files is delegated to a C function when running qmldiff as a library (if `LOAD EXTERNAL` is encountered and a C handler isn't set up, qmldiff will error). When using qmldiff as a standalone app, this statement will only log the file name of the file the QMD tried to load to stdout.
 
 
 #### `VERSION <allowed_version>`
