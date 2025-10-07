@@ -436,8 +436,7 @@ impl Parser {
         }
     }
 
-    pub fn reread_as_compound_name(&mut self, root: String) -> Result<String> {
-        let mut root = root.clone();
+    pub fn reread_as_compound_name(&mut self, mut root: String) -> Result<String> {
         if let Some(TokenType::Symbol('.')) = self.stream.peek() {
             root.push_str(&self.build_delimeted_name(
                 '.',
@@ -458,8 +457,11 @@ impl Parser {
                 value.extend_from_slice(&self.read_until_depth_runs_out('[', ']')?);
             }
             Some(TokenType::Identifier(name)) => {
+                // Skip past the name we just peeked
                 let name = name.clone();
-                let next = self.next_lex().unwrap();
+                let _next = self.next_lex().unwrap();
+                self.discard_whitespace();
+                let name = self.reread_as_compound_name(name)?;
                 self.discard_whitespace();
                 // Read next to check if it's an object
                 if let Some(TokenType::Symbol('{')) = self.stream.peek() {
@@ -471,7 +473,7 @@ impl Parser {
                     )?));
                 }
                 // Is not. Push both to the value stack...
-                value.push(next);
+                value.push(TokenType::Identifier(name));
             }
             Some(TokenType::Symbol('(')) => {
                 value.extend_from_slice(&self.read_until_depth_runs_out('(', ')')?);
