@@ -190,6 +190,7 @@ impl Parser {
     ) -> Result<String> {
         let mut final_string = String::default();
         let mut next_delim = next_delim;
+        const WEAK_KEYWORDS: &'static [Keyword] = &[Keyword::Component];
         loop {
             let token = self.stream.peek();
             match token {
@@ -213,6 +214,13 @@ impl Parser {
                 | Some(TokenType::EndOfStream)
                 | None => {
                     return Ok(final_string);
+                }
+                Some(TokenType::Keyword(weak)) if WEAK_KEYWORDS.contains(weak) => {
+                    if next_delim {
+                        return error_received_expected!(weak, format!("Delimeter {}", delim));
+                    }
+                    next_delim = true;
+                    final_string.push_str(&Into::<String>::into(weak.clone()));
                 }
 
                 Some(token) if type_allowed != discriminant(token) => {
