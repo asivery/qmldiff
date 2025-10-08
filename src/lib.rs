@@ -233,7 +233,10 @@ pub unsafe extern "C" fn qmldiff_is_modified(file_name: *const c_char) -> bool {
         .lock()
         .unwrap()
         .iter()
-        .any(|e| e.destination == ObjectToChange::File(file_name.clone()))
+        .any(|e| match &e.destination {
+            ObjectToChange::File(z) | ObjectToChange::FileTokenStream(z) => z == &file_name,
+            _ => false,
+        })
 }
 
 #[no_mangle]
