@@ -5,7 +5,6 @@ use crate::{
     hash::hash,
     parser::qml::{
         lexer::TokenType,
-        parser::{AssignmentChildValue, Object, ObjectChild, QMLTree, TreeElement},
     },
 };
 
@@ -19,7 +18,7 @@ pub struct HashTabFile {
     pub version: String,
 }
 
-fn hash_token_stream(hashtab: &mut HashTab, tokens: &Vec<TokenType>) {
+pub fn hash_token_stream(tokens: &Vec<TokenType>, hashtab: &mut HashTab) {
     for token in tokens {
         match token {
             TokenType::Identifier(id) => {
@@ -31,75 +30,6 @@ fn hash_token_stream(hashtab: &mut HashTab, tokens: &Vec<TokenType>) {
                 hashtab.insert(hash(contents), contents.to_string());
             }
             _ => {}
-        }
-    }
-}
-
-fn update_hashtab(hashtab: &mut HashTab, qml_obj: &Object) {
-    macro_rules! include {
-        ($value: expr) => {
-            hashtab.insert(hash($value), $value.clone());
-        };
-    }
-    include!(&qml_obj.name);
-    for child in &qml_obj.children {
-        let child_name = child.get_name();
-        if let Some(child_name) = child_name {
-            include!(child_name);
-        }
-        match child {
-            ObjectChild::Object(obj) => update_hashtab(hashtab, obj),
-            ObjectChild::Component(obj) => {
-                update_hashtab(hashtab, &obj.object);
-                include!(&obj.name);
-            }
-            ObjectChild::Assignment(asi) => {
-                match &asi.value {
-                    AssignmentChildValue::Object(obj) => update_hashtab(hashtab, obj),
-                    AssignmentChildValue::Other(obj) => hash_token_stream(hashtab, obj),
-                };
-                include!(&asi.name);
-            }
-            ObjectChild::Signal(sig) => {
-                include!(&sig.name);
-            }
-            ObjectChild::ObjectAssignment(asi) => {
-                update_hashtab(hashtab, &asi.value);
-                include!(&asi.name);
-            }
-            ObjectChild::Enum(enu) => {
-                include!(&enu.name);
-            }
-            ObjectChild::Function(func) => {
-                include!(&func.name);
-            }
-            ObjectChild::Property(prop) => {
-                include!(&prop.name);
-                match &prop.default_value {
-                    Some(AssignmentChildValue::Object(obj)) => update_hashtab(hashtab, obj),
-                    Some(AssignmentChildValue::Other(obj)) => hash_token_stream(hashtab, obj),
-                    _ => {}
-                }
-            }
-            ObjectChild::ObjectProperty(prop) => {
-                include!(&prop.name);
-                update_hashtab(hashtab, &prop.default_value);
-            }
-        }
-    }
-}
-
-pub fn update_hashtab_from_tree(qml: &QMLTree, hashtab: &mut HashTab) {
-    for root_child in qml {
-        match root_child {
-            TreeElement::Object(obj) => update_hashtab(hashtab, obj),
-            TreeElement::Import(import) => {
-                hashtab.insert(hash(&import.object_name), import.object_name.clone());
-                if let Some(ref alias) = import.alias {
-                    hashtab.insert(hash(&alias), alias.clone());
-                }
-            }
-            TreeElement::Pragma(_) => {} // Pragmas can't be hashed.
         }
     }
 }

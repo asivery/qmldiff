@@ -7,7 +7,7 @@ use std::{
 
 use crate::{
     hash::hash,
-    hashtab::{update_hashtab_from_tree, HashTab, InvHashTab},
+    hashtab::{hash_token_stream, HashTab, InvHashTab},
     parser::{
         common::StringCharacterTokenizer,
         diff::{
@@ -22,7 +22,7 @@ use crate::{
     processor::find_and_process,
     slots::Slots,
     util::common_util::{
-        filter_out_non_matching_versions, load_diff_file, parse_qml, tokenize_qml,
+        filter_out_non_matching_versions, load_diff_file, tokenize_qml,
     },
 };
 
@@ -40,14 +40,13 @@ fn build_recursive_hashmap(directory: &String, dir_relative_name: &String, tab: 
         if t.is_file() {
             if name.ends_with(".qml") {
                 println!("Hashing {}", file.path().to_str().unwrap());
-                let tree = parse_qml(
+                let tree = tokenize_qml(
                     std::fs::read_to_string(file.path()).unwrap(),
                     &name,
                     None,
                     None,
-                )
-                .unwrap();
-                update_hashtab_from_tree(&tree, tab);
+                );
+                hash_token_stream(&tree, tab);
             }
         } else {
             build_recursive_hashmap(
