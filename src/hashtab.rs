@@ -59,7 +59,7 @@ where
             let this_file_version = String::from(String::from_utf8_lossy(&str_content));
             if let Some(ref allowed_version) = current_version {
                 if this_file_version != *allowed_version {
-                    println!("The file {} is only valid for QML environment version {}. Currently running {}. Loading skipped.", hashtab_file.as_ref().display(), allowed_version, allowed_version);
+                    println!("The file {} is only valid for QML environment version {}. Currently running {}. Loading skipped.", hashtab_file.as_ref().display(), this_file_version, allowed_version);
                     return Ok(());
                 }
             }
