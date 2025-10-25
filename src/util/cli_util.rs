@@ -14,7 +14,7 @@ use crate::{
             self,
             emitter::emit_token_stream,
             hash_processor::diff_hash_remapper,
-            lexer::TokenType,
+            lexer::{HashedValue, TokenType},
             parser::{Change, ExternalLoader, ObjectToChange},
         },
         qml::{self, hash_extension::qml_hash_remap},
@@ -101,10 +101,15 @@ fn process_single_diff(
             .into_iter()
             .map(|e| match e {
                 TokenType::Identifier(id) => {
-                    if inv_hashtab.contains_key(&id) {
-                        TokenType::Identifier(format!("[[{}]]", inv_hashtab.get(&id).unwrap()))
+                    let splits_values = id.split('.').map(|e| inv_hashtab.get(e).cloned().unwrap_or(0)).collect::<Vec<_>>();
+                    if splits_values.iter().all(|e| e != &0) {
+                        TokenType::HashedValue(diff::lexer::HashedValue::HashedIdentifier(splits_values))
                     } else {
-                        TokenType::Identifier(id)
+                        if let Some(id) = inv_hashtab.get(&id) {
+                            TokenType::HashedValue(HashedValue::HashedIdentifier(vec![*id]))
+                        } else {
+                            TokenType::Identifier(id)
+                        }
                     }
                 }
                 TokenType::String(string) => {

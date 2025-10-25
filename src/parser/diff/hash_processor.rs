@@ -16,26 +16,32 @@ pub struct DiffHashRemapper<'a> {
     hashtab: &'a HashTab,
 }
 
+fn resolve_hashed_ids(hashtab: &HashTab, source_name: &str, id: &Vec<u64>) -> Result<String> {
+    let mut out_id = String::new();
+    for id in id {
+        if out_id != "" { out_id += "." }
+        out_id += 
+        hashtab
+            .get(&id)
+            .ok_or(Error::msg(format!(
+                "Couldn't resolve the hashed identifier {} required by {}",
+                id, source_name
+            )))?;
+    }
+
+    Ok(out_id)
+}
+
+
 pub fn diff_hash_remapper(
     hashtab: &HashTab,
     value: TokenType,
     source_name: &str,
 ) -> Result<TokenType> {
     match value {
-        TokenType::HashedValue(HashedValue::HashedIdentifier(id)) => Ok(TokenType::Identifier(
-            hashtab
-                .get(&id)
-                .ok_or(Error::msg(format!(
-                    "Couldn't resolve the hashed identifier {} required by {}",
-                    id, source_name
-                )))?
-                .clone(),
-        )),
+        TokenType::HashedValue(HashedValue::HashedIdentifier(id)) => Ok(TokenType::Identifier(resolve_hashed_ids(hashtab, source_name, &id)?)),
         TokenType::HashedValue(HashedValue::HashedString(q, id)) => {
-            let unwrapped = hashtab.get(&id).ok_or(Error::msg(format!(
-                "Couldn't resolve the hashed identifier {} required by {}",
-                id, source_name
-            )))?;
+            let unwrapped = resolve_hashed_ids(hashtab, source_name, &id)?;
             Ok(TokenType::String(if q != '`' {
                 format!("{}{}{}", q, unwrapped, q)
             } else {

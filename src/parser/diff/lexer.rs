@@ -119,8 +119,8 @@ impl TryFrom<&str> for Keyword {
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum HashedValue {
-    HashedString(char, u64),
-    HashedIdentifier(u64),
+    HashedString(char, Vec<u64>),
+    HashedIdentifier(Vec<u64>),
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -208,7 +208,7 @@ impl Lexer {
                         Some('\'') | Some('"') | Some('`') => self.stream.advance(),
                         _ => None
                     };
-                    let hash = self.stream.collect_while(|_, c| c.is_ascii_digit().into());
+                    let hash = self.stream.collect_while(|_, c| (c.is_ascii_digit() || c == '.').into());
                     let a = self.stream.peek();
                     self.stream.advance();
                     let b = self.stream.peek();
@@ -217,7 +217,7 @@ impl Lexer {
                         _ => return Err(Error::msg("Invalid hash!")),
                     }
                     self.stream.advance();
-                    let hash = hash.parse::<u64>().unwrap();
+                    let hash = hash.split('.').map(|x| x.parse::<u64>().unwrap()).collect();
                     Ok(TokenType::HashedValue(match string_quote {
                         None => HashedValue::HashedIdentifier(hash),
                         Some(q) => HashedValue::HashedString(q, hash)

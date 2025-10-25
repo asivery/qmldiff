@@ -22,7 +22,9 @@ pub fn hash_token_stream(tokens: &Vec<TokenType>, hashtab: &mut HashTab) {
     for token in tokens {
         match token {
             TokenType::Identifier(id) => {
-                hashtab.insert(hash(id), id.clone());
+                for id in id.split("."){
+                    hashtab.insert(hash(id), id.to_string());
+                }
             }
             TokenType::String(str) => {
                 // Remove the quotes around the string:
