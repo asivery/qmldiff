@@ -19,9 +19,39 @@ pub struct HashTabFile {
 }
 
 pub fn hash_token_stream(tokens: &Vec<TokenType>, hashtab: &mut HashTab) {
+    let mut last_was_dot = false;
+    let mut dot_accumulator: Option<String> = None;
     for token in tokens {
+        // Compatibility:
         match token {
             TokenType::Identifier(id) => {
+                if last_was_dot {
+                    if let Some(x) = dot_accumulator.as_mut() {
+                        *x += &format!(".{id}");
+                    }
+                    last_was_dot = false;
+                } else {
+                    dot_accumulator = Some(id.clone());
+                }
+            }
+            TokenType::Symbol('.') if !last_was_dot => {
+                if dot_accumulator.is_some() {
+                    last_was_dot = true;
+                }
+            }
+            _ => {
+                last_was_dot = false;
+                if let Some(acc) = dot_accumulator {
+                    hashtab.insert(hash(&acc), acc);
+                }
+                dot_accumulator = None;
+            }
+        }
+
+
+        match token {
+            TokenType::Identifier(id) => {
+                hashtab.insert(hash(id), id.to_string());
                 for id in id.split("."){
                     hashtab.insert(hash(id), id.to_string());
                 }
@@ -33,6 +63,9 @@ pub fn hash_token_stream(tokens: &Vec<TokenType>, hashtab: &mut HashTab) {
             }
             _ => {}
         }
+    }
+    if let Some(acc) = dot_accumulator {
+        hashtab.insert(hash(&acc), acc);
     }
 }
 
