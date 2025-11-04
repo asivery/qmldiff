@@ -1,6 +1,6 @@
 use std::{fmt::Display, mem::take};
 
-use anyhow::Error;
+use anyhow::{Error, bail};
 
 use crate::parser::{
     common::{CollectionType, StringCharacterTokenizer},
@@ -264,6 +264,7 @@ impl Lexer {
                         match token {
                             qml::lexer::TokenType::Symbol('{') => depth += 1,
                             qml::lexer::TokenType::Symbol('}') => depth -= 1,
+                            qml::lexer::TokenType::EndOfStream => bail!("Unexpected End-Of-Stream reached!"),
                             _ => {}
                         }
                         if depth == 0 {
@@ -307,9 +308,9 @@ impl Iterator for Lexer {
             }
             match self.next_token() {
                 Ok(token) => return Some(token),
-                Err(_) => {
+                Err(e) => {
                     // TODO: handle this
-                    continue;
+                    panic!("Error while reading token: {e:?}");
                 }
             }
         }
