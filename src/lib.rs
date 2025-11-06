@@ -18,6 +18,7 @@ use util::common_util::{load_diff_file, parse_diff};
 use crate::parser::diff::parser::ExternalLoader;
 use crate::util::common_util::{filter_out_non_matching_versions, tokenize_qml};
 
+mod error_collector;
 mod hash;
 mod hashrules;
 mod hashtab;
@@ -100,6 +101,7 @@ extern "C" fn qmldiff_add_external_diff(
         change_file_contents,
         &file_identifier,
         &HASHTAB.lock().unwrap(),
+        None,
         None,
     ) {
         Err(problem) => {
@@ -194,6 +196,7 @@ extern "C" fn qmldiff_build_change_files(root_dir: *const c_char) -> i32 {
                     .lock()
                     .unwrap()
                     .map(|e| Box::new(e) as Box<dyn ExternalLoader>),
+                None,
             ) {
                 Err(problem) => {
                     eprintln!("[qmldiff]: Failed to load file {}: {:?}", file, problem)
