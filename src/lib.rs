@@ -45,6 +45,7 @@ lazy_static! {
     static ref EXTERNAL_LOADER: Mutex<Option<CExternalLoaderFunc>> = Mutex::new(None);
     static ref ERROR_COLLECTION_ENABLED: Mutex<bool> = Mutex::new(false);
     static ref ERROR_COLLECTOR: Mutex<ErrorCollector> = Mutex::new(ErrorCollector::new());
+    static ref ERROR_FILE_CACHE: Mutex<Vec<CString>> = Mutex::new(Vec::new());
 }
 
 #[no_mangle]
@@ -306,6 +307,44 @@ extern "C" fn qmldiff_print_and_clear_collection_errors() {
         eprintln!("\nTotal errors: {}", collector.error_count());
     }
     *collector = ErrorCollector::new();
+    *ERROR_FILE_CACHE.lock().unwrap() = Vec::new();
+}
+
+#[no_mangle]
+extern "C" fn qmldiff_get_error_count() -> i32 {
+    ERROR_COLLECTOR.lock().unwrap().error_count() as i32
+}
+
+#[no_mangle]
+extern "C" fn qmldiff_get_error_hash(index: i32) -> u64 {
+    let collector = ERROR_COLLECTOR.lock().unwrap();
+    let errors = collector.errors();
+    if index < 0 || index as usize >= errors.len() {
+        return 0;
+    }
+    errors[index as usize].hash_id
+}
+
+#[no_mangle]
+extern "C" fn qmldiff_get_error_file(index: i32) -> *const c_char {
+    let collector = ERROR_COLLECTOR.lock().unwrap();
+    let errors = collector.errors();
+    if index < 0 || index as usize >= errors.len() {
+        return std::ptr::null();
+    }
+
+    let mut cache = ERROR_FILE_CACHE.lock().unwrap();
+    let cache_index = index as usize;
+
+    if cache_index >= cache.len() {
+        cache.resize(errors.len(), CString::new("").unwrap());
+    }
+
+    if cache[cache_index].as_bytes().is_empty() {
+        cache[cache_index] = CString::new(errors[cache_index].source_file.as_str()).unwrap();
+    }
+
+    cache[cache_index].as_ptr()
 }
 
 #[no_mangle]
