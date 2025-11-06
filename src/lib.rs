@@ -15,6 +15,7 @@ use std::{
 };
 use util::common_util::{load_diff_file, parse_diff};
 
+use crate::error_collector::ErrorCollector;
 use crate::parser::diff::parser::ExternalLoader;
 use crate::util::common_util::{filter_out_non_matching_versions, tokenize_qml};
 
@@ -42,6 +43,8 @@ lazy_static! {
     static ref CURRENT_VERSION: Mutex<Option<String>> = Mutex::new(None);
     static ref SLOTS_DISABLED: Mutex<bool> = Mutex::new(false);
     static ref EXTERNAL_LOADER: Mutex<Option<CExternalLoaderFunc>> = Mutex::new(None);
+    static ref ERROR_COLLECTION_ENABLED: Mutex<bool> = Mutex::new(false);
+    static ref ERROR_COLLECTOR: Mutex<ErrorCollector> = Mutex::new(ErrorCollector::new());
 }
 
 #[no_mangle]
@@ -96,13 +99,23 @@ extern "C" fn qmldiff_add_external_diff(
         .to_str()
         .unwrap()
         .into();
+
+    let error_collection_enabled = *ERROR_COLLECTION_ENABLED.lock().unwrap();
+    let mut error_collector_guard;
+    let error_collector = if error_collection_enabled {
+        error_collector_guard = ERROR_COLLECTOR.lock().unwrap();
+        Some(&mut *error_collector_guard)
+    } else {
+        None
+    };
+
     match parse_diff(
         None,
         change_file_contents,
         &file_identifier,
         &HASHTAB.lock().unwrap(),
         None,
-        None,
+        error_collector,
     ) {
         Err(problem) => {
             eprintln!(
@@ -173,6 +186,15 @@ extern "C" fn qmldiff_build_change_files(root_dir: *const c_char) -> i32 {
 
     load_hashtab(&root_dir);
 
+    let error_collection_enabled = *ERROR_COLLECTION_ENABLED.lock().unwrap();
+    let mut error_collector_guard;
+    let mut error_collector = if error_collection_enabled {
+        error_collector_guard = ERROR_COLLECTOR.lock().unwrap();
+        Some(&mut *error_collector_guard)
+    } else {
+        None
+    };
+
     if let Ok(dir) = std::fs::read_dir(&root_dir) {
         let mut files = vec![];
         for file in dir.flatten() {
@@ -196,7 +218,7 @@ extern "C" fn qmldiff_build_change_files(root_dir: *const c_char) -> i32 {
                     .lock()
                     .unwrap()
                     .map(|e| Box::new(e) as Box<dyn ExternalLoader>),
-                None,
+                error_collector.as_deref_mut(),
             ) {
                 Err(problem) => {
                     eprintln!("[qmldiff]: Failed to load file {}: {:?}", file, problem)
@@ -258,6 +280,32 @@ pub unsafe extern "C" fn qmldiff_disable_slots_while_processing() {
  */
 pub unsafe extern "C" fn qmldiff_enable_slots_while_processing() {
     *(SLOTS_DISABLED.lock().unwrap()) = false;
+}
+
+#[no_mangle]
+extern "C" fn qmldiff_enable_error_collection() {
+    *(ERROR_COLLECTION_ENABLED.lock().unwrap()) = true;
+}
+
+#[no_mangle]
+extern "C" fn qmldiff_disable_error_collection() {
+    *(ERROR_COLLECTION_ENABLED.lock().unwrap()) = false;
+}
+
+#[no_mangle]
+extern "C" fn qmldiff_has_collection_errors() -> bool {
+    ERROR_COLLECTOR.lock().unwrap().has_errors()
+}
+
+#[no_mangle]
+extern "C" fn qmldiff_print_and_clear_collection_errors() {
+    let mut collector = ERROR_COLLECTOR.lock().unwrap();
+    if collector.has_errors() {
+        eprintln!("\nHash lookup errors found:");
+        collector.print_errors();
+        eprintln!("\nTotal errors: {}", collector.error_count());
+    }
+    *collector = ErrorCollector::new();
 }
 
 #[no_mangle]
