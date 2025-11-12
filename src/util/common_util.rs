@@ -3,6 +3,7 @@ use std::{cell::RefCell, fs::read_to_string, path::Path, rc::Rc, sync::Arc};
 use anyhow::{Error, Result};
 
 use crate::{
+    error_collector::ErrorCollector,
     hashtab::HashTab,
     parser::{
         common::{IteratorPipeline, StringCharacterTokenizer},
@@ -67,6 +68,7 @@ pub fn load_diff_file<P>(
     file_path: P,
     hashtab: &HashTab,
     external_loader: Option<Box<dyn ExternalLoader>>,
+    error_collector: Option<&mut ErrorCollector>,
 ) -> Result<Vec<Change>>
 where
     P: AsRef<Path>,
@@ -78,6 +80,7 @@ where
         &file_path.as_ref().to_string_lossy(),
         hashtab,
         external_loader,
+        error_collector,
     )
 }
 
@@ -87,11 +90,32 @@ pub fn parse_diff(
     diff_name: &str,
     hashtab: &HashTab,
     external_loader: Option<Box<dyn ExternalLoader>>,
+    error_collector: Option<&mut ErrorCollector>,
 ) -> Result<Vec<Change>> {
-    let lexer = diff::lexer::Lexer::new(StringCharacterTokenizer::new(contents));
-    let tokens: Vec<diff::lexer::TokenType> = lexer
-        .map(|e| diff_hash_remapper(hashtab, e, diff_name).unwrap())
-        .collect();
+    let tokens: Vec<diff::lexer::TokenType> = if let Some(collector) = error_collector {
+        let mut lexer = diff::lexer::Lexer::with_error_collection(
+            StringCharacterTokenizer::new(contents),
+        );
+
+        let mut lexed_tokens = Vec::new();
+        while let Some(token) = lexer.next() {
+            lexed_tokens.push(token);
+        }
+
+        for error in lexer.take_errors() {
+            collector.add_lexer_error(error.message, error.position, error.line);
+        }
+
+        lexed_tokens
+            .into_iter()
+            .map(|e| diff_hash_remapper(hashtab, e, diff_name, &mut Some(collector)))
+            .collect::<Result<Vec<_>>>()?
+    } else {
+        let lexer = diff::lexer::Lexer::new(StringCharacterTokenizer::new(contents));
+        lexer
+            .map(|e| diff_hash_remapper(hashtab, e, diff_name, &mut None))
+            .collect::<Result<Vec<_>>>()?
+    };
     let mut parser = diff::parser::Parser::new(
         Box::new(tokens.into_iter()),
         root_dir,

@@ -2,9 +2,12 @@ use std::{fmt::Display, mem::take};
 
 use anyhow::{Error, bail};
 
-use crate::parser::{
-    common::{CollectionType, StringCharacterTokenizer},
-    qml,
+use crate::{
+    error_collector::LexerError,
+    parser::{
+        common::{CollectionType, StringCharacterTokenizer},
+        qml,
+    },
 };
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -143,7 +146,9 @@ pub enum TokenType {
 
 pub struct Lexer {
     pub stream: StringCharacterTokenizer,
-    pub line_pos: usize, // Current position within a line [unused.]
+    pub line_pos: usize,
+    pub collect_errors: bool,
+    pub errors: Vec<LexerError>,
 }
 
 impl Lexer {
@@ -151,7 +156,22 @@ impl Lexer {
         Self {
             stream: input,
             line_pos: 0,
+            collect_errors: false,
+            errors: Vec::new(),
         }
+    }
+
+    pub fn with_error_collection(input: StringCharacterTokenizer) -> Self {
+        Self {
+            stream: input,
+            line_pos: 0,
+            collect_errors: true,
+            errors: Vec::new(),
+        }
+    }
+
+    pub fn take_errors(&mut self) -> Vec<LexerError> {
+        std::mem::take(&mut self.errors)
     }
     pub fn next_token(&mut self) -> Result<TokenType, Error> {
         if let Some(c) = self.stream.peek() {
@@ -238,6 +258,9 @@ impl Lexer {
                         let initial_token = qml_lexer.next_token()?;
                         loop {
                             let token = qml_lexer.next_token()?;
+                            if token == qml::lexer::TokenType::EndOfStream {
+                                bail!("Unexpected End-Of-Stream reached while processing STREAM block!");
+                            }
                             if token == initial_token {
                                 break;
                             }
@@ -309,8 +332,18 @@ impl Iterator for Lexer {
             match self.next_token() {
                 Ok(token) => return Some(token),
                 Err(e) => {
-                    // TODO: handle this
-                    panic!("Error while reading token: {e:?}");
+                    if self.collect_errors {
+                        self.errors.push(LexerError::new(
+                            e.to_string(),
+                            self.stream.position,
+                            self.line_pos,
+                        ));
+                        if self.stream.position < self.stream.input.len() {
+                            self.stream.advance();
+                        }
+                    } else {
+                        panic!("Error while reading token: {e:?}");
+                    }
                 }
             }
         }

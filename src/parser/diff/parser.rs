@@ -845,7 +845,7 @@ impl<'a> Parser<'a> {
                 if let Some(hashtab) = self.hashtab {
                     Lexer::new(StringCharacterTokenizer::new(file_contents))
                         .map(|e| {
-                            diff_hash_remapper(hashtab, e, &full_path.to_string_lossy()).unwrap()
+                            diff_hash_remapper(hashtab, e, &full_path.to_string_lossy(), &mut None).unwrap()
                         })
                         .collect::<Vec<TokenType>>()
                 } else {

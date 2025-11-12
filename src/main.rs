@@ -3,6 +3,7 @@ use std::fs::{create_dir, remove_dir_all};
 
 use clap::{Parser, Subcommand};
 use cli_util::{apply_changes, build_change_structures, process_diff_tree, start_hashmap_build};
+use error_collector::ErrorCollector;
 use hash::hash;
 use hashrules::HashRules;
 use hashtab::{merge_hash_file, serialize_hashtab, HashTab, InvHashTab};
@@ -10,6 +11,7 @@ use slots::Slots;
 
 #[path = "util/cli_util.rs"]
 mod cli_util;
+mod error_collector;
 mod hash;
 mod hashrules;
 mod hashtab;
@@ -90,6 +92,9 @@ enum Commands {
         // /// Watch the diff_list for changes
         // #[arg(short, long, action = clap::ArgAction::SetTrue)]
         // watch_for_changes: bool,
+        /// Collect all hash errors before failing
+        #[arg(long, action = clap::ArgAction::SetTrue)]
+        collect_hash_errors: bool,
         /// The QML environment version
         #[arg(default_value = None, required = false, long)]
         version: Option<String>,
@@ -151,6 +156,7 @@ fn main() {
             diff_list,
             flatten,
             clean,
+            collect_hash_errors,
             version,
         } => {
             let mut hashtab_value = HashTab::new();
@@ -165,9 +171,27 @@ fn main() {
             }
             let _ = create_dir(qml_destination_path);
             let mut slots = Slots::new();
-            let mut changes =
-                build_change_structures(diff_list, &hashtab_value, &mut slots, version.clone())
-                    .unwrap();
+            let mut error_collector = ErrorCollector::new();
+            let mut changes = build_change_structures(
+                diff_list,
+                &hashtab_value,
+                &mut slots,
+                version.clone(),
+                if *collect_hash_errors {
+                    Some(&mut error_collector)
+                } else {
+                    None
+                },
+            )
+            .unwrap();
+
+            if *collect_hash_errors && error_collector.has_errors() {
+                eprintln!("\nHash lookup errors found:");
+                error_collector.print_errors();
+                eprintln!("\nTotal errors: {}", error_collector.error_count());
+                std::process::exit(1);
+            }
+
             slots.process_slots(&mut changes);
             apply_changes(
                 qml_root_path,

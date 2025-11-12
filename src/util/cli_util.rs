@@ -6,6 +6,7 @@ use std::{
 };
 
 use crate::{
+    error_collector::ErrorCollector,
     hash::hash,
     hashtab::{hash_token_stream, HashTab, InvHashTab},
     parser::{
@@ -94,7 +95,7 @@ fn process_single_diff(
     };
     let mut token_stream: Vec<TokenType> =
         diff::lexer::Lexer::new(StringCharacterTokenizer::new(string_contents))
-            .map(|e| diff_hash_remapper(hashtab, e, diff_file_path).unwrap())
+            .map(|e| diff_hash_remapper(hashtab, e, diff_file_path, &mut None).unwrap())
             .collect();
     if into_hash {
         token_stream = token_stream
@@ -189,7 +190,7 @@ fn process_single_diff(
                     } => TokenType::QMLCode {
                         qml_code: qml_code
                             .into_iter()
-                            .map(|e| qml_hash_remap(hashtab, e, diff_file_path).unwrap())
+                            .map(|e| qml_hash_remap(hashtab, e, diff_file_path, None).unwrap())
                             .collect::<Vec<_>>(),
                         stream_character,
                     },
@@ -216,6 +217,7 @@ pub fn build_change_structures(
     hashtab: &HashTab,
     slots: &mut Slots,
     version: Option<String>,
+    mut error_collector: Option<&mut ErrorCollector>,
 ) -> Result<Vec<Change>> {
     let mut all_changes = Vec::new();
     for path_str in files {
@@ -231,6 +233,7 @@ pub fn build_change_structures(
                 path,
                 hashtab,
                 Some(Box::new(LoggingExternalLoader {})),
+                error_collector.as_deref_mut(),
             )?;
             filter_out_non_matching_versions(
                 &mut this_diff,
@@ -251,6 +254,7 @@ pub fn build_change_structures(
                     &sub_file_path,
                     hashtab,
                     Some(Box::new(LoggingExternalLoader {})),
+                    error_collector.as_deref_mut(),
                 )?;
                 filter_out_non_matching_versions(
                     &mut this_diff,
