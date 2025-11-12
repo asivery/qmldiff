@@ -92,15 +92,29 @@ pub fn parse_diff(
     external_loader: Option<Box<dyn ExternalLoader>>,
     error_collector: Option<&mut ErrorCollector>,
 ) -> Result<Vec<Change>> {
-    let lexer = diff::lexer::Lexer::new(StringCharacterTokenizer::new(contents));
     let tokens: Vec<diff::lexer::TokenType> = if let Some(collector) = error_collector {
-        lexer
-            .map(|e| diff_hash_remapper(hashtab, e, diff_name, &mut Some(collector)).unwrap())
-            .collect()
+        let mut lexer = diff::lexer::Lexer::with_error_collection(
+            StringCharacterTokenizer::new(contents),
+        );
+
+        let mut lexed_tokens = Vec::new();
+        while let Some(token) = lexer.next() {
+            lexed_tokens.push(token);
+        }
+
+        for error in lexer.take_errors() {
+            collector.add_lexer_error(error.message, error.position, error.line);
+        }
+
+        lexed_tokens
+            .into_iter()
+            .map(|e| diff_hash_remapper(hashtab, e, diff_name, &mut Some(collector)))
+            .collect::<Result<Vec<_>>>()?
     } else {
+        let lexer = diff::lexer::Lexer::new(StringCharacterTokenizer::new(contents));
         lexer
-            .map(|e| diff_hash_remapper(hashtab, e, diff_name, &mut None).unwrap())
-            .collect()
+            .map(|e| diff_hash_remapper(hashtab, e, diff_name, &mut None))
+            .collect::<Result<Vec<_>>>()?
     };
     let mut parser = diff::parser::Parser::new(
         Box::new(tokens.into_iter()),

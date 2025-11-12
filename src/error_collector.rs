@@ -25,34 +25,76 @@ impl fmt::Display for HashLookupError {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct LexerError {
+    pub message: String,
+    pub position: usize,
+    pub line: usize,
+}
+
+impl LexerError {
+    pub fn new(message: String, position: usize, line: usize) -> Self {
+        Self {
+            message,
+            position,
+            line,
+        }
+    }
+}
+
+impl fmt::Display for LexerError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "Lexer error at position {} (line {}): {}",
+            self.position, self.line, self.message
+        )
+    }
+}
+
 #[derive(Debug, Default, Clone)]
 pub struct ErrorCollector {
-    errors: Vec<HashLookupError>,
+    hash_errors: Vec<HashLookupError>,
+    lexer_errors: Vec<LexerError>,
 }
 
 impl ErrorCollector {
     pub fn new() -> Self {
-        Self { errors: Vec::new() }
+        Self {
+            hash_errors: Vec::new(),
+            lexer_errors: Vec::new(),
+        }
     }
 
     pub fn add_error(&mut self, error: HashLookupError) {
-        self.errors.push(error);
+        self.hash_errors.push(error);
+    }
+
+    pub fn add_lexer_error(&mut self, message: String, position: usize, line: usize) {
+        self.lexer_errors.push(LexerError::new(message, position, line));
     }
 
     pub fn has_errors(&self) -> bool {
-        !self.errors.is_empty()
+        !self.hash_errors.is_empty() || !self.lexer_errors.is_empty()
     }
 
     pub fn error_count(&self) -> usize {
-        self.errors.len()
+        self.hash_errors.len() + self.lexer_errors.len()
     }
 
     pub fn errors(&self) -> &[HashLookupError] {
-        &self.errors
+        &self.hash_errors
+    }
+
+    pub fn lexer_errors(&self) -> &[LexerError] {
+        &self.lexer_errors
     }
 
     pub fn print_errors(&self) {
-        for error in &self.errors {
+        for error in &self.hash_errors {
+            eprintln!("{}", error);
+        }
+        for error in &self.lexer_errors {
             eprintln!("{}", error);
         }
     }

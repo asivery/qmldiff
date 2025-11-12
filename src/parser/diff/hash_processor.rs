@@ -80,13 +80,8 @@ pub fn diff_hash_remapper(
             Ok(TokenType::QMLCode {
                 qml_code: qml_code
                     .into_iter()
-                    .map(|e| match qml_hash_remap(hashtab, e, source_name, error_collector.as_deref_mut()) {
-                        Ok(v) => v,
-                        Err(e) => {
-                            panic!("{:?}", e); // temporary solution.
-                        }
-                    })
-                    .collect(),
+                    .map(|e| qml_hash_remap(hashtab, e, source_name, error_collector.as_deref_mut()))
+                    .collect::<Result<Vec<_>>>()?,
                 stream_character: is_stream,
             })
         }
