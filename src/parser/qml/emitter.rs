@@ -337,6 +337,9 @@ pub fn emit_object(object: &Object, indent: usize) -> Vec<Line> {
                 let arg_stream = emit_token_stream(&function.arguments, indent + 1);
                 sub_lines.last_mut().unwrap().text += &arg_stream[0].text;
                 sub_lines.extend_from_slice(&arg_stream[1..]);
+                if let Some(ret) = &function.return_type {
+                    sub_lines.last_mut().unwrap().text += &format!(": {ret}");
+                }
                 let func_stream = emit_token_stream(&function.body, 0);
                 sub_lines.last_mut().unwrap().text += &func_stream[0].text;
                 sub_lines.extend_from_slice(&func_stream[1..]);
