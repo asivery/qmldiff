@@ -15,7 +15,10 @@ pub fn token_stream_into_vec(
 }
 
 fn hash_list_to_str(hl: &Vec<u64>) -> String {
-    hl.iter().map(|x| x.to_string()).collect::<Vec<_>>().join(".")
+    hl.iter()
+        .map(|x| x.to_string())
+        .collect::<Vec<_>>()
+        .join(".")
 }
 
 pub fn emit_token_stream(stream: Vec<super::lexer::TokenType>) -> String {
@@ -51,7 +54,9 @@ pub fn emit_token_stream(stream: Vec<super::lexer::TokenType>) -> String {
             TokenType::HashedValue(HashedValue::HashedString(q, hash)) => {
                 format!("[[{}{}]]", q, hash_list_to_str(&hash))
             }
-            TokenType::HashedValue(HashedValue::HashedIdentifier(hash)) => format!("[[{}]]", &hash_list_to_str(&hash)),
+            TokenType::HashedValue(HashedValue::HashedIdentifier(hash)) => {
+                format!("[[{}]]", &hash_list_to_str(&hash))
+            }
         };
         output_string += &token_string;
     }

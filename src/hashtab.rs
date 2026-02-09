@@ -1,12 +1,7 @@
 use anyhow::Result;
 use std::{collections::HashMap, fs::File, io::Read, path::Path};
 
-use crate::{
-    hash::hash,
-    parser::qml::{
-        lexer::TokenType,
-    },
-};
+use crate::{hash::hash, parser::qml::lexer::TokenType};
 
 pub type HashTab = HashMap<u64, String>;
 pub type InvHashTab = HashMap<String, u64>;
@@ -48,11 +43,10 @@ pub fn hash_token_stream(tokens: &Vec<TokenType>, hashtab: &mut HashTab) {
             }
         }
 
-
         match token {
             TokenType::Identifier(id) => {
                 hashtab.insert(hash(id), id.to_string());
-                for id in id.split("."){
+                for id in id.split(".") {
                     hashtab.insert(hash(id), id.to_string());
                 }
             }

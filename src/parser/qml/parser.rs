@@ -629,12 +629,13 @@ impl Parser {
                                 let arguments = self.read_until_depth_runs_out('(', ')')?;
                                 self.discard_whitespace();
 
-                                let return_type = if let Some(TokenType::Symbol(':')) = self.stream.peek() {
-                                    let _ = self.next_lex();
-                                    Some(self.next_id(true)?)
-                                } else {
-                                    None
-                                };
+                                let return_type =
+                                    if let Some(TokenType::Symbol(':')) = self.stream.peek() {
+                                        let _ = self.next_lex();
+                                        Some(self.next_id(true)?)
+                                    } else {
+                                        None
+                                    };
                                 self.discard_whitespace();
                                 let body = self.read_until_depth_runs_out('{', '}')?;
                                 object.children.push(ObjectChild::Function(FunctionChild {
