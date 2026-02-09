@@ -240,6 +240,7 @@ fn main() {
                     println!(" - {val} required by {}", files.into_iter().collect::<Vec<_>>().join(", "));
                 }
                 println!("Total errors: {len}");
+                std::process::exit(1);
             }
         }
     }
