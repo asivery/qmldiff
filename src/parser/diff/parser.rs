@@ -11,7 +11,7 @@ use std::{
 use crate::{
     error_received_expected,
     hashtab::HashTab,
-    parser::{common::StringCharacterTokenizer, diff::hash_processor::diff_hash_remapper, qml},
+    parser::{common::{StringCharacterTokenizer, get_load_path}, diff::hash_processor::diff_hash_remapper, qml},
 };
 use anyhow::{bail, Error, Result};
 
@@ -823,12 +823,7 @@ impl<'a> Parser<'a> {
 
     fn get_full_path_and_root_of(&'a self, file: &str) -> Result<(&'a str, PathBuf)> {
         if let Some(ref root) = self.root_path {
-            let new_path = Path::new(file);
-            if new_path.is_absolute() {
-                return Err(Error::msg("Cannot load files using absolute paths!"));
-            }
-            let full_path = Path::new(root).join(new_path.strip_prefix("/").unwrap_or(new_path));
-            Ok((root, full_path))
+            Ok((root, get_load_path(root, file)?))
         } else {
             Err(Error::msg("Cannot load a file if no root path set!"))
         }

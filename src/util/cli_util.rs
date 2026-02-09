@@ -1,23 +1,21 @@
 use anyhow::{Error, Result};
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     fs::{create_dir_all, read_dir, read_to_string, write},
-    path::Path,
+    path::{Path, PathBuf},
 };
 
 use crate::{
     hash::hash,
-    hashtab::{hash_token_stream, HashTab, InvHashTab},
+    hashtab::{HashTab, InvHashTab, hash_token_stream},
     parser::{
-        common::StringCharacterTokenizer,
-        diff::{
+        self, common::{StringCharacterTokenizer, get_load_path}, diff::{
             self,
             emitter::emit_token_stream,
             hash_processor::diff_hash_remapper,
-            lexer::{HashedValue, TokenType},
+            lexer::{self, HashedValue, TokenType},
             parser::{Change, ExternalLoader, ObjectToChange},
-        },
-        qml::{self, hash_extension::qml_hash_remap},
+        }, qml::{self, hash_extension::qml_hash_remap}
     },
     processor::find_and_process,
     slots::Slots,
@@ -330,4 +328,76 @@ pub fn apply_changes(
     }
 
     Ok(())
+}
+
+pub fn check_compatibility_with_qmds(missing_hashes: &mut HashMap<u64, HashSet<String>>, hashtab: &HashTab, qmds: &Vec<String>) {
+    for qmd in qmds {
+        macro_rules! merge_conditionally {
+            ($hv: expr) => {
+                if !hashtab.contains_key(&$hv) {
+                    if let Some(file_set) = missing_hashes.get_mut(&$hv) {
+                        file_set.insert(qmd.clone());
+                    } else {
+                        let mut hs = HashSet::new();
+                        hs.insert(qmd.clone());
+                        missing_hashes.insert($hv, hs);
+                    }
+                }
+            };
+        }
+        let contents = read_to_string(qmd).unwrap();
+        let lexer = lexer::Lexer::new(StringCharacterTokenizer::new(contents));
+        let mut next_is_load = false;
+        let mut to_load = Vec::new();
+        for e in lexer.into_iter() {
+            if next_is_load {
+                match &e {
+                    TokenType::String(str) | TokenType::Identifier(str) => {
+                        let as_string = str.clone();
+                        let pb = PathBuf::from(qmd);
+                        let parent_of_this_file = if let Some(parent) = pb.parent() {
+                            parent.to_str().unwrap()
+                        } else {
+                            "."
+                        };
+                        to_load.push(get_load_path(parent_of_this_file, &as_string).unwrap().to_string_lossy().to_string());
+                        next_is_load = false;
+                    },
+                    TokenType::Whitespace(_) => {},
+                    other => {
+                        panic!("Invalid LOAD entry in {qmd}: {other:?}");
+                    }
+                };
+            }
+            match e {
+                TokenType::HashedValue(h) => {
+                    for e in match h {
+                        lexer::HashedValue::HashedString(_, z) => z,
+                        lexer::HashedValue::HashedIdentifier(z) => z,
+                    } {
+                        merge_conditionally!(e);
+                    }
+                }
+                TokenType::QMLCode {
+                    qml_code,
+                    stream_character: _,
+                } => {
+                    for qml_token in qml_code {
+                        match qml_token {
+                            crate::parser::qml::lexer::TokenType::Extension(
+                                parser::qml::lexer::QMLExtensionToken::HashedIdentifier(e),
+                            ) => merge_conditionally!(e),
+                            crate::parser::qml::lexer::TokenType::Extension(
+                                parser::qml::lexer::QMLExtensionToken::HashedString(_, e),
+                            ) => merge_conditionally!(e),
+                            _ => {}
+                        }
+                    }
+                }
+                TokenType::Keyword(lexer::Keyword::Load) => next_is_load = true,
+                _ => {}
+            }
+        }
+        check_compatibility_with_qmds(missing_hashes, hashtab, &to_load);
+    }
 }

@@ -1,4 +1,6 @@
-use anyhow::Error;
+use std::path::{Path, PathBuf};
+
+use anyhow::{Error, Result};
 
 #[macro_export]
 macro_rules! error_received_expected {
@@ -195,4 +197,13 @@ impl StringCharacterTokenizer {
         }
         result
     }
+}
+
+pub fn get_load_path(root: &str, file: &str) -> Result<PathBuf> {
+    let new_path = Path::new(file);
+    if new_path.is_absolute() {
+        return Err(Error::msg("Cannot load files using absolute paths!"));
+    }
+    let full_path = Path::new(root).join(new_path.strip_prefix("/").unwrap_or(new_path));
+    Ok(full_path)
 }

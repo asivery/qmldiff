@@ -1,5 +1,8 @@
 #![allow(dead_code)]
-use std::fs::{create_dir, remove_dir_all};
+use std::{
+    collections::{HashMap, HashSet},
+    fs::{create_dir, remove_dir_all},
+};
 
 use clap::{Parser, Subcommand};
 use cli_util::{apply_changes, build_change_structures, process_diff_tree, start_hashmap_build};
@@ -7,6 +10,8 @@ use hash::hash;
 use hashrules::HashRules;
 use hashtab::{merge_hash_file, serialize_hashtab, HashTab, InvHashTab};
 use slots::Slots;
+
+use crate::{cli_util::check_compatibility_with_qmds};
 
 #[path = "util/cli_util.rs"]
 mod cli_util;
@@ -98,6 +103,10 @@ enum Commands {
     GCDHashtab {
         output_hashtab: String,
         hashtabs: Vec<String>,
+    },
+    CheckCompatibility {
+        hashtab: String,
+        qmds: Vec<String>,
     },
 }
 
@@ -213,6 +222,25 @@ fn main() {
                 }
             }
             std::fs::write(output_hashtab, serialize_hashtab(&out, None)).unwrap();
+        }
+        Commands::CheckCompatibility {
+            hashtab: hashtab_file,
+            qmds,
+        } => {
+            let mut hashtab = HashTab::new();
+            merge_hash_file(hashtab_file, &mut hashtab, None, None).unwrap();
+            let mut missing_hashes: HashMap<u64, HashSet<String>> = HashMap::new();
+            check_compatibility_with_qmds(&mut missing_hashes, &hashtab, qmds);
+            if missing_hashes.is_empty() {
+                println!("No compatibility errors found.");
+            } else {
+                println!("Hash errors: ");
+                let len = missing_hashes.len();
+                for (val, files) in missing_hashes {
+                    println!(" - {val} required by {}", files.into_iter().collect::<Vec<_>>().join(", "));
+                }
+                println!("Total errors: {len}");
+            }
         }
     }
 }
