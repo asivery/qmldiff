@@ -1,6 +1,7 @@
-use std::{cell::RefCell, fs::read_to_string, path::Path, rc::Rc, sync::Arc};
+use std::{cell::RefCell, collections::HashSet, fs::read_to_string, path::Path, rc::Rc, sync::Arc};
 
 use anyhow::{Error, Result};
+use file_id::{get_file_id, FileId};
 
 use crate::{
     hashtab::HashTab,
@@ -62,23 +63,49 @@ pub fn filter_out_non_matching_versions(
     }
 }
 
+pub fn check_if_seen_and_add<P>(
+    file_path: P,
+    seen: &mut Option<&mut HashSet<FileId>>,
+) -> Result<bool>
+where
+    P: AsRef<Path>,
+{
+    Ok(if let Some(seen) = seen {
+        let hash = get_file_id(file_path)?;
+        if seen.contains(&hash) {
+            false
+        } else {
+            seen.insert(hash);
+            true
+        }
+    } else {
+        true
+    })
+}
+
 pub fn load_diff_file<P>(
     root_dir: Option<String>,
     file_path: P,
     hashtab: &HashTab,
     external_loader: Option<Box<dyn ExternalLoader>>,
+    mut seen_files: Option<&mut HashSet<FileId>>,
 ) -> Result<Vec<Change>>
 where
     P: AsRef<Path>,
 {
-    let contents = read_to_string(&file_path)?;
-    parse_diff(
-        root_dir,
-        contents,
-        &file_path.as_ref().to_string_lossy(),
-        hashtab,
-        external_loader,
-    )
+    if check_if_seen_and_add(&file_path, &mut seen_files)? {
+        let contents = read_to_string(&file_path)?;
+        parse_diff(
+            root_dir,
+            contents,
+            &file_path.as_ref().to_string_lossy(),
+            hashtab,
+            external_loader,
+            seen_files,
+        )
+    } else {
+        Ok(vec![])
+    }
 }
 
 pub fn parse_diff(
@@ -87,6 +114,7 @@ pub fn parse_diff(
     diff_name: &str,
     hashtab: &HashTab,
     external_loader: Option<Box<dyn ExternalLoader>>,
+    seen_files: Option<&mut HashSet<FileId>>,
 ) -> Result<Vec<Change>> {
     let lexer = diff::lexer::Lexer::new(StringCharacterTokenizer::new(contents));
     let tokens: Vec<diff::lexer::TokenType> = lexer
@@ -98,6 +126,7 @@ pub fn parse_diff(
         Arc::from(diff_name.to_string()),
         Some(hashtab),
         external_loader.map(|e| Rc::new(RefCell::new(e))),
+        seen_files,
     );
 
     parser.parse(None)

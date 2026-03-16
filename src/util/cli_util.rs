@@ -7,15 +7,18 @@ use std::{
 
 use crate::{
     hash::hash,
-    hashtab::{HashTab, InvHashTab, hash_token_stream},
+    hashtab::{hash_token_stream, HashTab, InvHashTab},
     parser::{
-        self, common::{StringCharacterTokenizer, get_load_path}, diff::{
+        self,
+        common::{get_load_path, StringCharacterTokenizer},
+        diff::{
             self,
             emitter::emit_token_stream,
             hash_processor::diff_hash_remapper,
             lexer::{self, HashedValue, TokenType},
             parser::{Change, ExternalLoader, ObjectToChange},
-        }, qml::{self, hash_extension::qml_hash_remap}
+        },
+        qml::{self, hash_extension::qml_hash_remap},
     },
     processor::find_and_process,
     slots::Slots,
@@ -219,6 +222,7 @@ pub fn build_change_structures(
     version: Option<String>,
 ) -> Result<Vec<Change>> {
     let mut all_changes = Vec::new();
+    let mut seen = HashSet::new();
     for path_str in files {
         let path = Path::new(path_str);
         if !path.exists() {
@@ -232,6 +236,7 @@ pub fn build_change_structures(
                 path,
                 hashtab,
                 Some(Box::new(LoggingExternalLoader {})),
+                Some(&mut seen),
             )?;
             filter_out_non_matching_versions(
                 &mut this_diff,
@@ -252,6 +257,7 @@ pub fn build_change_structures(
                     &sub_file_path,
                     hashtab,
                     Some(Box::new(LoggingExternalLoader {})),
+                    Some(&mut seen),
                 )?;
                 filter_out_non_matching_versions(
                     &mut this_diff,
@@ -330,7 +336,11 @@ pub fn apply_changes(
     Ok(())
 }
 
-pub fn check_compatibility_with_qmds(missing_hashes: &mut HashMap<u64, HashSet<String>>, hashtab: &HashTab, qmds: &Vec<String>) {
+pub fn check_compatibility_with_qmds(
+    missing_hashes: &mut HashMap<u64, HashSet<String>>,
+    hashtab: &HashTab,
+    qmds: &Vec<String>,
+) {
     for qmd in qmds {
         macro_rules! merge_conditionally {
             ($hv: expr) => {
@@ -360,10 +370,15 @@ pub fn check_compatibility_with_qmds(missing_hashes: &mut HashMap<u64, HashSet<S
                         } else {
                             "."
                         };
-                        to_load.push(get_load_path(parent_of_this_file, &as_string).unwrap().to_string_lossy().to_string());
+                        to_load.push(
+                            get_load_path(parent_of_this_file, &as_string)
+                                .unwrap()
+                                .to_string_lossy()
+                                .to_string(),
+                        );
                         next_is_load = false;
-                    },
-                    TokenType::Whitespace(_) => {},
+                    }
+                    TokenType::Whitespace(_) => {}
                     other => {
                         panic!("Invalid LOAD entry in {qmd}: {other:?}");
                     }

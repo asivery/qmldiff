@@ -1,6 +1,6 @@
 use std::{
     cell::RefCell,
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     iter::Peekable,
     mem::take,
     path::{Path, PathBuf},
@@ -8,14 +8,19 @@ use std::{
     sync::Arc,
 };
 
+use super::lexer::{Keyword, Lexer, TokenType};
 use crate::{
     error_received_expected,
     hashtab::HashTab,
-    parser::{common::{StringCharacterTokenizer, get_load_path}, diff::hash_processor::diff_hash_remapper, qml},
+    parser::{
+        common::{get_load_path, StringCharacterTokenizer},
+        diff::hash_processor::diff_hash_remapper,
+        qml,
+    },
+    util::common_util::check_if_seen_and_add,
 };
 use anyhow::{bail, Error, Result};
-
-use super::lexer::{Keyword, Lexer, TokenType};
+use file_id::FileId;
 
 pub trait ExternalLoader {
     fn load_external(&mut self, file: &str);
@@ -27,6 +32,7 @@ pub struct Parser<'a> {
     root_path: Option<String>,
     hashtab: Option<&'a HashTab>,
     external_loader: Option<Rc<RefCell<Box<dyn ExternalLoader>>>>,
+    seen_files: Option<&'a mut HashSet<FileId>>,
 }
 
 #[derive(Debug, Clone)]
@@ -851,6 +857,15 @@ impl<'a> Parser<'a> {
         versions_allowed: Option<Vec<String>>,
     ) -> Result<()> {
         let (root, full_path) = self.get_full_path_and_root_of(file)?;
+        let moved_root = if let Some(e) = Path::new(file).parent() {
+            String::from(Path::new(root).join(e).to_string_lossy())
+        } else {
+            root.to_string()
+        };
+
+        if !check_if_seen_and_add(&full_path, &mut self.seen_files)? {
+            return Ok(());
+        }
         let file_contents = match std::fs::read_to_string(&full_path) {
             Ok(e) => e,
             Err(_) => {
@@ -859,11 +874,6 @@ impl<'a> Parser<'a> {
                     full_path.to_string_lossy()
                 )))
             }
-        };
-        let moved_root = if let Some(e) = Path::new(file).parent() {
-            String::from(Path::new(root).join(e).to_string_lossy())
-        } else {
-            root.to_string()
         };
         let mut parser = Self::new(
             Box::new({
@@ -883,8 +893,10 @@ impl<'a> Parser<'a> {
             Arc::from(full_path.to_string_lossy().to_string()),
             self.hashtab,
             self.external_loader.clone(),
+            take(&mut self.seen_files),
         );
         output.extend(parser.parse(versions_allowed.clone())?);
+        self.seen_files = parser.seen_files;
         Ok(())
     }
 
@@ -1063,6 +1075,7 @@ impl<'a> Parser<'a> {
         source_name: Arc<String>,
         hashtab: Option<&'a HashTab>,
         external_loader: Option<Rc<RefCell<Box<dyn ExternalLoader>>>>,
+        seen_files: Option<&'a mut HashSet<FileId>>,
     ) -> Parser<'a> {
         Parser {
             source_name,
@@ -1070,6 +1083,7 @@ impl<'a> Parser<'a> {
             root_path,
             hashtab,
             external_loader,
+            seen_files,
         }
     }
 }

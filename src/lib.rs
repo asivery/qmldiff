@@ -1,4 +1,5 @@
 #![allow(dead_code)]
+use file_id::FileId;
 use hashrules::HashRules;
 use hashtab::{merge_hash_file, serialize_hashtab, HashTab};
 use lazy_static::lazy_static;
@@ -6,6 +7,7 @@ use lib_util::{include_if_building_hashtab, is_building_hashtab};
 use parser::diff::parser::{Change, ObjectToChange};
 use processor::find_and_process;
 use slots::Slots;
+use std::collections::HashSet;
 use std::ops::Deref;
 use std::os::raw::c_void;
 use std::time::Duration;
@@ -41,6 +43,7 @@ lazy_static! {
     static ref CURRENT_VERSION: Mutex<Option<String>> = Mutex::new(None);
     static ref SLOTS_DISABLED: Mutex<bool> = Mutex::new(false);
     static ref EXTERNAL_LOADER: Mutex<Option<CExternalLoaderFunc>> = Mutex::new(None);
+    static ref SEEN_FILES: Mutex<HashSet<FileId>> = Mutex::new(HashSet::new());
 }
 
 #[no_mangle]
@@ -101,6 +104,7 @@ extern "C" fn qmldiff_add_external_diff(
         &file_identifier,
         &HASHTAB.lock().unwrap(),
         None,
+        None, // External diffs are exempt from seen-files checking.
     ) {
         Err(problem) => {
             eprintln!(
@@ -171,6 +175,8 @@ extern "C" fn qmldiff_build_change_files(root_dir: *const c_char) -> i32 {
 
     load_hashtab(&root_dir);
 
+    let mut seen_locked = SEEN_FILES.lock().unwrap();
+
     if let Ok(dir) = std::fs::read_dir(&root_dir) {
         let mut files = vec![];
         for file in dir.flatten() {
@@ -194,6 +200,7 @@ extern "C" fn qmldiff_build_change_files(root_dir: *const c_char) -> i32 {
                     .lock()
                     .unwrap()
                     .map(|e| Box::new(e) as Box<dyn ExternalLoader>),
+                Some(&mut seen_locked),
             ) {
                 Err(problem) => {
                     eprintln!("[qmldiff]: Failed to load file {}: {:?}", file, problem)
