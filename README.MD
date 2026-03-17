@@ -1,5 +1,66 @@
 # QMLDiff - a program for editing QML trees.
 
+## Command Line
+
+QMLDiff can be used as a command-line tool.
+
+### Building
+
+1. [Install Rust](https://rust-lang.org/tools/install/)
+2. Clone or download this repo
+3. Open a terminal in this repo's root
+4. Run `cargo build`
+5. The built binaries may be found under `./target`
+
+
+### Usage
+
+Right now the following subcommands are supported:
+
+- `qmldiff create-hashtab <QML root> [output hashtab path]`
+    * Creates a hashtab file from all the files within `QML root` recursively.
+- `qmldiff hash-diffs <hashtab> <diff 1> [diff 2]... [-r]`
+    * Turns all the diffs provided into their hashed versions (using the provided hashtab). This operation changes the diffs IN PLACE!
+    * To unhash a diff, specify the `-r` flag.
+- `qmldiff apply-diffs [--hashtab <hashtab>] <QML root> <QML destination> [...diffs] [-f] [-c]`
+    * Applies all the provided diffs to the QML files within QML root, then writes the results to QML destination.
+    * `-f` flattens the output file tree into the root directory
+    * `-c` deletes the QML destination directory before applying the diffs.
+
+
+## Library
+
+QMLDiff can be used as a C library. It exports the following functions:
+
+- `int qmldiff_build_change_files(const char *rootDir)`
+    * Loads all the diff files from rootDir
+    * Returns the amount of files read
+- `char *qmldiff_process_file(const char *fileName, char *contents, size_t contentsLength)`
+    * Processes a single QML file using diffs loaded via `qmldiff_build_change_files`
+    * Returns NULL in case of an error, or when no changes were performed. Newly allocated string containing the re-emitted QML otherwise
+- `char qmldiff_is_modified(const char *fileName)`
+    * Checks if any diff affects the file `fileName`
+    * Returns true if they do, false otherwise
+- `void qmldiff_start_saving_thread()`
+    * Starts the hashtab-exporting thread *
+    * Should be called as part of the initialization sequence of your program.
+- `void qmldiff_load_rules(const char *rules)`
+    * Sets the global hashtab-creation rules to the argument given
+    * `rules` are meant to be passed as a raw string containing the hashtab rules. Not a file path!
+
+\* - In order to create a hashtab when QMLDiff is utilized as a library, please set the `QMLDIFF_HASHTAB_CREATE` environment variable to the desired path where the hashtab file is to be kept. This will essentially disable all the diff-applying functionality of QMLDiff. It will be saving the current state of the global hashtab into the desired file every minute, until terminated.
+
+
+## Contributing
+
+### TODOs:
+
+- [ ] Better error handling - currently both syntax and processing errors are ambiguous
+- [ ] Better documentation
+- [ ] Better emitters - the current ones make the output QML a bit unreadable
+- [ ] Better method of exporting hashtab when running as a library
+
+
 ## The diff language
 
 ### Statements
@@ -561,49 +622,3 @@ AFFECT /main.qml
     END TRAVERSE
 END AFFECT
 ```
-
-## Using QMLDiff as a command-line tool:
-
-QMLDiff can be used as a command-line tool.
-
-Right now the following subcommands are supported:
-
-- create-hashtab `<QML root> [output hashtab path]`
-    * Creates a hashtab file from all the files within `QML root` recursively.
-- hash-diffs `<hashtab> <diff 1> [diff 2]... [-r]`
-    * Turns all the diffs provided into their hashed versions (using the provided hashtab). This operation changes the diffs IN PLACE!
-    * `-r` flag reverts this operation.
-- apply-diffs `[--hashtab <hashtab>] <QML root> <QML destination> [...diffs] [-f] [-c]`
-    * Applies all the provided diffs to the QML files within QML root, then writes the results to QML destination.
-    * `-f` flattens the output file tree into the root directory
-    * `-c` deletes the QML destination directory before applying the diffs.
-
-## Using QMLDiff as a library:
-
-QMLDiff can be used as a C library. It exports the following functions:
-
-- `int qmldiff_build_change_files(const char *rootDir)`
-    * Loads all the diff files from rootDir
-    * Returns the amount of files read
-- `char *qmldiff_process_file(const char *fileName, char *contents, size_t contentsLength)`
-    * Processes a single QML file using diffs loaded via `qmldiff_build_change_files`
-    * Returns NULL in case of an error, or when no changes were performed. Newly allocated string containing the re-emitted QML otherwise
-- `char qmldiff_is_modified(const char *fileName)`
-    * Checks if any diff affects the file `fileName`
-    * Returns true if they do, false otherwise
-- `void qmldiff_start_saving_thread()`
-    * Starts the hashtab-exporting thread *
-    * Should be called as part of the initialization sequence of your program.
-- `void qmldiff_load_rules(const char *rules)`
-    * Sets the global hashtab-creation rules to the argument given
-    * `rules` are meant to be passed as a raw string containing the hashtab rules. Not a file path!
-
-\* - In order to create a hashtab when QMLDiff is utilized as a library, please set the `QMLDIFF_HASHTAB_CREATE` environment variable to the desired path where the hashtab file is to be kept. This will essentially disable all the diff-applying functionality of QMLDiff. It will be saving the current state of the global hashtab into the desired file every minute, until terminated.
-
-
-## TODOs:
-
-- [ ] Better error handling - currently both syntax and processing errors are ambiguous
-- [ ] Better documentation
-- [ ] Better emitters - the current ones make the output QML a bit unreadable
-- [ ] Better method of exporting hashtab when running as a library
