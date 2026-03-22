@@ -4,7 +4,7 @@ use std::{
     fs::{create_dir_all, read_dir, read_to_string, write},
     path::{Path, PathBuf},
 };
-
+use regex::Regex;
 use crate::{
     hash::hash,
     hashtab::{hash_token_stream, HashTab, InvHashTab},
@@ -95,24 +95,29 @@ fn process_single_diff(
         diff::lexer::Lexer::new(StringCharacterTokenizer::new(string_contents))
             .map(|e| diff_hash_remapper(hashtab, e, diff_file_path).unwrap())
             .collect();
+    let regex_numbers_only = Regex::new(r"^[\d\.]*$").unwrap();
     if into_hash {
         token_stream = token_stream
             .into_iter()
             .map(|e| match e {
                 TokenType::Identifier(id) => {
-                    let splits_values = id
-                        .split('.')
-                        .map(|e| inv_hashtab.get(e).cloned().unwrap_or(0))
-                        .collect::<Vec<_>>();
-                    if splits_values.iter().all(|e| e != &0) {
-                        TokenType::HashedValue(diff::lexer::HashedValue::HashedIdentifier(
-                            splits_values,
-                        ))
+                    if regex_numbers_only.is_match(&id) {
+                        TokenType::Identifier(id)
                     } else {
-                        if let Some(id) = inv_hashtab.get(&id) {
-                            TokenType::HashedValue(HashedValue::HashedIdentifier(vec![*id]))
+                        let splits_values = id
+                            .split('.')
+                            .map(|e| inv_hashtab.get(e).cloned().unwrap_or(0))
+                            .collect::<Vec<_>>();
+                        if splits_values.iter().all(|e| e != &0) {
+                            TokenType::HashedValue(diff::lexer::HashedValue::HashedIdentifier(
+                                splits_values,
+                            ))
                         } else {
-                            TokenType::Identifier(id)
+                            if let Some(id) = inv_hashtab.get(&id) {
+                                TokenType::HashedValue(HashedValue::HashedIdentifier(vec![*id]))
+                            } else {
+                                TokenType::Identifier(id)
+                            }
                         }
                     }
                 }
