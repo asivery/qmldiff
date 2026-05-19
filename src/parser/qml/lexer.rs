@@ -278,11 +278,31 @@ impl Lexer {
                 }
 
                 c if c.is_ascii_digit() => {
+                    let num_system_prefix = if c == '0' {
+                        if let Some(chr) = self.stream.peek_offset(1) {
+                            match chr {
+                                'x' | 'o' | '0' | 'b' => {
+                                    self.stream.advance();
+                                    self.stream.advance();
+                                    Some(chr)
+                                }
+                                _ => None
+                            }
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    };
                     // Allow multiple dots in the number for simplicity's sake
                     let num_str = self
                         .stream
                         .collect_while(|_, c| (c.is_ascii_digit() || c == '.').into());
-                    Ok(TokenType::Number(num_str))
+                    if let Some(chr) = num_system_prefix {
+                        Ok(TokenType::Number(format!("0{chr}{num_str}")))
+                    } else {
+                        Ok(TokenType::Number(num_str))
+                    }
                 }
 
                 c if c.is_alphabetic() || c == '_' => {
