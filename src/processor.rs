@@ -446,8 +446,8 @@ fn parse_argument_stream(stream: &Vec<TokenType>) -> Result<(Vec<String>, usize)
             TokenType::Symbol(')') => {
                 requires_close = false;
             }
-            TokenType::Unknown('=') => {
-                if stream.get(pos) != Some(&TokenType::Unknown('>')) {
+            TokenType::Symbol('=') => {
+                if stream.get(pos) != Some(&TokenType::Symbol('>')) {
                     return Err(Error::msg(
                         "Cannot parse QML stream - invalid argument stream!",
                     ));
@@ -517,8 +517,8 @@ fn build_arrow_func(
     enclosed: bool,
 ) -> Vec<TokenType> {
     let mut base = build_arguments_token_stream(arguments);
-    base.push(TokenType::Unknown('='));
-    base.push(TokenType::Unknown('>'));
+    base.push(TokenType::Symbol('='));
+    base.push(TokenType::Symbol('>'));
     if enclosed {
         base.push(TokenType::Symbol('{'));
     }

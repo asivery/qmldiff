@@ -97,7 +97,7 @@ impl Display for TokenType {
             TokenType::Keyword(k) => Into::<String>::into(k.clone()),
             TokenType::SymbolicKeyword(k) => Into::<String>::into(k.clone()),
             TokenType::Number(k) => k.to_string(),
-            TokenType::Symbol(k) | TokenType::Unknown(k) => String::from(*k),
+            TokenType::Symbol(k) => String::from(*k),
             TokenType::Whitespace(s) => s.clone(),
             TokenType::NewLine(_) => String::from("\n"),
             TokenType::Comment(comment) => format!("/*{}*/", comment),
@@ -136,7 +136,6 @@ pub enum TokenType {
     NewLine(usize),
     Whitespace(String),
     EndOfStream,
-    Unknown(char),
     Extension(QMLExtensionToken),
 }
 
@@ -318,14 +317,9 @@ impl Lexer {
                     }
                 }
 
-                '{' | '}' | ':' | ';' | '.' | ',' | '(' | ')' | '[' | ']' | '|' | '&' | '%' => {
-                    let symbol = self.stream.advance().unwrap();
-                    Ok(TokenType::Symbol(symbol))
-                }
-
                 _ => {
                     let unknown = self.stream.advance().unwrap();
-                    Ok(TokenType::Unknown(unknown))
+                    Ok(TokenType::Symbol(unknown))
                 }
             }
         } else {

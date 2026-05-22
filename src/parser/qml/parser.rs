@@ -195,7 +195,7 @@ impl Parser {
         loop {
             let token = self.stream.peek();
             match token {
-                Some(TokenType::Symbol(chr)) | Some(TokenType::Unknown(chr)) => {
+                Some(TokenType::Symbol(chr)) => {
                     if *chr == delim {
                         if next_delim {
                             final_string.push(*chr);
@@ -262,14 +262,14 @@ impl Parser {
     fn next_typed_id(&mut self) -> Result<String> {
         let mut base_id = self.next_id(true)?;
         self.discard_whitespace();
-        if let Some(TokenType::Unknown('<')) = self.stream.peek() {
+        if let Some(TokenType::Symbol('<')) = self.stream.peek() {
             self.stream.next();
             let type_id = self.next_typed_id()?;
             base_id.push('<');
             base_id.push_str(&type_id);
             base_id.push('>');
             let next = self.next_lex()?;
-            if let TokenType::Unknown('>') = next {
+            if let TokenType::Symbol('>') = next {
             } else {
                 return error_received_expected!(next, ">");
             }
@@ -487,10 +487,10 @@ impl Parser {
             Some(TokenType::Symbol('(')) => {
                 value.extend_from_slice(&self.read_until_depth_runs_out('(', ')')?);
                 self.discard_whitespace();
-                if let Some(TokenType::Unknown('=')) = self.stream.peek() {
+                if let Some(TokenType::Symbol('=')) = self.stream.peek() {
                     value.push(self.stream.next().unwrap());
                     let next_lex = self.next_lex()?;
-                    if let TokenType::Unknown('>') = next_lex {
+                    if let TokenType::Symbol('>') = next_lex {
                         value.push(next_lex);
                         self.discard_whitespace();
                         //value.extend_from_slice(&self.read_until_depth_runs_out('{', '}')?);
@@ -533,7 +533,7 @@ impl Parser {
                         // println!("Last important is {:?}", &last_important);
                         match last_important {
                             None => break 'terminal,
-                            Some(TokenType::Symbol(sym)) | Some(TokenType::Unknown(sym)) => {
+                            Some(TokenType::Symbol(sym)) => {
                                 match sym {
                                     // Terminal symbols:
                                     '}' | ')' | ']' | ';' => {} // Terminate
@@ -660,7 +660,7 @@ impl Parser {
                                         TokenType::Symbol('}') => break,
                                         TokenType::Identifier(id) => {
                                             self.discard_whitespace();
-                                            if let Some(TokenType::Unknown('=')) =
+                                            if let Some(TokenType::Symbol('=')) =
                                                 self.stream.peek()
                                             {
                                                 self.stream.next();
