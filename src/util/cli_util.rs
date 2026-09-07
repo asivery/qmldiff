@@ -1,10 +1,3 @@
-use anyhow::{Error, Result};
-use std::{
-    collections::{HashMap, HashSet},
-    fs::{create_dir_all, read_dir, read_to_string, write},
-    path::{Path, PathBuf},
-};
-use regex::Regex;
 use crate::{
     hash::hash,
     hashtab::{hash_token_stream, HashTab, InvHashTab},
@@ -23,6 +16,13 @@ use crate::{
     processor::find_and_process,
     slots::Slots,
     util::common_util::{filter_out_non_matching_versions, load_diff_file, tokenize_qml},
+};
+use anyhow::{Error, Result};
+use regex::Regex;
+use std::{
+    collections::{HashMap, HashSet},
+    fs::{create_dir_all, read_dir, read_to_string, write},
+    path::{Path, PathBuf},
 };
 
 fn build_recursive_hashmap(directory: &String, dir_relative_name: &String, tab: &mut HashTab) {

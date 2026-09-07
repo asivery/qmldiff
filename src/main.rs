@@ -11,7 +11,7 @@ use hashrules::HashRules;
 use hashtab::{merge_hash_file, serialize_hashtab, HashTab, InvHashTab};
 use slots::Slots;
 
-use crate::{cli_util::check_compatibility_with_qmds};
+use crate::cli_util::check_compatibility_with_qmds;
 
 #[path = "util/cli_util.rs"]
 mod cli_util;
@@ -237,7 +237,10 @@ fn main() {
                 println!("Hash errors: ");
                 let len = missing_hashes.len();
                 for (val, files) in missing_hashes {
-                    println!(" - {val} required by {}", files.into_iter().collect::<Vec<_>>().join(", "));
+                    println!(
+                        " - {val} required by {}",
+                        files.into_iter().collect::<Vec<_>>().join(", ")
+                    );
                 }
                 println!("Total errors: {len}");
                 std::process::exit(1);
