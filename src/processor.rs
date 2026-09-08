@@ -1479,7 +1479,7 @@ impl ConditionRule {
                         match Regex::new(version) {
                             Ok(rgs) => rgs.is_match(version_provided),
                             Err(e) => {
-                                println!("Failed to parse regex {version} for system checking condition! ({e:?})");
+                                println!("[qmldiff]: Failed to parse regex {version} for system checking condition! ({e:?})");
                                 false
                             }
                         }
@@ -1487,6 +1487,7 @@ impl ConditionRule {
                         version_provided == version
                     }
                 } else {
+                    println!("[qmldiff]: A diff is checking against a version, but no system version defined!");
                     false
                 }
             }
