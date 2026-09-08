@@ -622,3 +622,87 @@ AFFECT /main.qml
     END TRAVERSE
 END AFFECT
 ```
+
+### Conditional code
+
+Qmldiff supports conditional code. It is possible to check for:
+
+- The existence of a given element in the tree
+- The presence of another QMD file in the global list of files to apply
+- Whether the system version matches a given string, either exactly or as a regex
+- The existence of a given slot
+
+In addition to that, it also supports boolean operations (NOT / OR / AND), else-if and else statements.
+
+The order of operations is as follows:
+
+- AND / OR
+- NOT
+- Parenthesis
+- Rules
+
+#### Tree-based checks
+
+To check if some element in the tree exists, use the `EXISTS` command:
+
+```
+IF EXISTS Item > Object
+    LOCATE BEFORE ALL
+    ...
+END IF
+```
+
+#### Slot-based checks
+
+To check if a given slot has been written to, use the `SLOT` command:
+
+```
+IF SLOT mySlot
+    ...
+END IF
+```
+
+#### Diff-based checks
+
+To check if a diff file exists, use the `DIFF` command:
+
+```
+IF DIFF `myDiff.qmd`
+    ...
+END IF
+```
+
+#### Version-based checks
+
+It is also possible to check whether the system version matches a certain value - either via a regex, or direct string matching:
+
+```
+; Regex:
+IF VERSION MATCHES "myRegex"
+    ...
+END IF
+```
+
+```
+; No regex:
+IF VERSION `3.10`
+    ...
+END IF
+```
+
+#### ELSE / ELIF
+
+As is the case in many other languages, one can place an `ELSE` or an `ELIF` statement after an `IF`, to check for alternative conditions, or to provide a catch-all
+clause for when the condition specified in the if statement doesn't apply.
+
+Example:
+
+```
+IF SLOT notExistent
+    ...
+ELSE IF DIFF `myDiff.qmd`
+    ...
+ELSE
+    ...
+END IF
+```
