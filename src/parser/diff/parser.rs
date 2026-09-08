@@ -2,7 +2,7 @@ use std::{
     cell::RefCell,
     collections::{HashMap, HashSet},
     iter::Peekable,
-    mem::take,
+    mem::{replace, take},
     path::{Path, PathBuf},
     rc::Rc,
     sync::Arc,
@@ -171,6 +171,31 @@ pub struct RebuildAction {
 }
 
 #[derive(Debug, Clone)]
+pub enum ConditionRule {
+    Exists(NodeTree),
+    SystemVersionMatches { version: String, is_regex: bool },
+    HasDiff(String),
+    HasSlot(String),
+    Negated(Box<ConditionRule>),
+    Subcondition(Box<Condition>),
+}
+
+#[derive(Debug, Clone, Default)]
+pub enum Condition {
+    #[default]
+    Yes,
+    Rule(ConditionRule),
+    Or(ConditionRule, Box<Condition>),
+    And(ConditionRule, Box<Condition>),
+}
+
+#[derive(Debug, Clone)]
+pub struct ConditionalBranch {
+    pub conditions: Vec<(Condition, Vec<FileChangeAction>)>,
+    pub default_fallthrough: Option<Vec<FileChangeAction>>,
+}
+
+#[derive(Debug, Clone)]
 pub enum FileChangeAction {
     Traverse(NodeTree),
     Assert(NodeTree),
@@ -186,6 +211,7 @@ pub enum FileChangeAction {
     AddImport(ImportAction),
     Rebuild(RebuildAction),
     Replicate(NodeTree),
+    ConditionalBranch(ConditionalBranch),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -253,6 +279,12 @@ pub enum RebuildInstruction {
     Insert(Vec<qml::lexer::TokenType>),
     Remove(RemoveRebuildAction),
     Replace(ReplaceRebuildAction),
+}
+
+pub enum InstructionReadingContext {
+    Root,
+    Slot,
+    Condition,
 }
 
 fn trim_token_stream(token_stream: &mut Vec<qml::lexer::TokenType>) {
@@ -371,6 +403,7 @@ impl<'a> Parser<'a> {
                     }
                 }
                 '>' => break, // Tree.
+                '(' | ')' => break, // conditions
                 _ => return error_received_expected!(self.stream.peek(), "Property match symbol"),
             }
         }
@@ -458,7 +491,16 @@ impl<'a> Parser<'a> {
                     | Keyword::Rebuild
                     | Keyword::Replicate
                     | Keyword::Version
-                    | Keyword::Redefine => {
+                    | Keyword::Redefine
+                    | Keyword::If
+                    | Keyword::Else
+                    | Keyword::Elif
+                    | Keyword::And
+                    | Keyword::Or
+                    | Keyword::Not
+                    | Keyword::Matches
+                    | Keyword::Diff
+                    | Keyword::Exists => {
                         return error_received_expected!(kw, "Rebuild directive keyword");
                     }
 
@@ -651,10 +693,139 @@ impl<'a> Parser<'a> {
         }
     }
 
-    pub fn read_next_instruction(&mut self, in_slot: bool) -> Result<FileChangeAction> {
+    fn read_condition_rule(&mut self) -> Result<ConditionRule> {
+        match self.next_lex()? {
+            TokenType::Keyword(Keyword::Not) => Ok(ConditionRule::Negated(Box::new(
+                self.read_condition_rule()?,
+            ))),
+            TokenType::Keyword(Keyword::Version) => {
+                self.discard_whitespace();
+                let mut next = self.next_lex()?;
+                let is_regex = if let TokenType::Keyword(Keyword::Matches) = next {
+                    next = self.next_lex()?;
+                    true
+                } else {
+                    false
+                };
+                let version = match next {
+                    TokenType::String(x) => x,
+                    TokenType::Identifier(x) => x,
+                    other => {
+                        return error_received_expected!(
+                            other,
+                            "String / version for system version matching"
+                        )
+                    }
+                };
+
+                Ok(ConditionRule::SystemVersionMatches { version, is_regex })
+            }
+            TokenType::Keyword(Keyword::Exists) => Ok(ConditionRule::Exists(self.read_tree()?)),
+            TokenType::Keyword(Keyword::Diff) => {
+                Ok(ConditionRule::HasDiff(self.next_string_or_id()?))
+            }
+            TokenType::Keyword(Keyword::Slot) => Ok(ConditionRule::HasSlot(self.next_id()?)),
+            TokenType::Symbol('(') => {
+                let subcond = self.read_condition()?;
+                match self.next_lex()? {
+                    TokenType::Symbol(')') => {}
+                    other => return error_received_expected!(other, "Closing parenthesis"),
+                }
+                Ok(ConditionRule::Subcondition(Box::new(subcond)))
+            }
+
+            other => {
+                return error_received_expected!(
+                    other,
+                    "NOT / VERSION / EXISTS / DIFF / SLOT / Subcondition"
+                )
+            }
+        }
+    }
+
+    fn read_condition(&mut self) -> Result<Condition> {
+        let rule = self.read_condition_rule()?;
+        self.discard_whitespace();
+        match self.stream.peek() {
+            Some(TokenType::Keyword(Keyword::And)) => {
+                self.next_lex()?;
+                return Ok(Condition::And(rule, Box::new(self.read_condition()?)));
+            }
+            Some(TokenType::Keyword(Keyword::Or)) => {
+                self.next_lex()?;
+                return Ok(Condition::Or(rule, Box::new(self.read_condition()?)));
+            }
+            _ => {}
+        }
+        Ok(Condition::Rule(rule))
+    }
+
+    fn read_conditional_branch(&mut self) -> Result<ConditionalBranch> {
+        let mut conditional_branch = ConditionalBranch {
+            conditions: Vec::new(),
+            default_fallthrough: None,
+        };
+
+        // We need to have at least one condition (if .. / ... / end if)
+        let mut condition = self.read_condition()?;
+        let mut current_instruction_list = Vec::new();
+        let mut is_in_else = false;
+
+        loop {
+            let instr = self.read_next_instruction(InstructionReadingContext::Condition)?;
+            match instr {
+                FileChangeAction::End(x) => {
+                    match x {
+                        Keyword::If => {
+                            // Terminate.
+                            break;
+                        }
+                        Keyword::Else | Keyword::Elif if is_in_else => {
+                            return error_received_expected!(TokenType::Keyword(x), "END IF");
+                        }
+                        Keyword::Else => {
+                            // Switch to deafult fallthrough, then terminate.
+                            is_in_else = true;
+                            conditional_branch
+                                .conditions
+                                .push((take(&mut condition), take(&mut current_instruction_list)))
+                        }
+                        Keyword::Elif => {
+                            // Switch the currently processed conditional
+                            conditional_branch.conditions.push((
+                                replace(&mut condition, self.read_condition()?),
+                                take(&mut current_instruction_list),
+                            ))
+                        }
+
+                        anything => current_instruction_list.push(FileChangeAction::End(anything)),
+                    }
+                }
+                instr => current_instruction_list.push(instr),
+            }
+        }
+
+        if is_in_else {
+            conditional_branch.default_fallthrough = Some(current_instruction_list)
+        } else {
+            conditional_branch
+                .conditions
+                .push((condition, current_instruction_list));
+        }
+
+        Ok(conditional_branch)
+    }
+
+    pub fn read_next_instruction(
+        &mut self,
+        context: InstructionReadingContext,
+    ) -> Result<FileChangeAction> {
         let next = self.next_lex()?;
         if let TokenType::Keyword(kw) = next {
             match kw {
+                Keyword::If => Ok(FileChangeAction::ConditionalBranch(
+                    self.read_conditional_branch()?,
+                )),
                 Keyword::Rebuild => {
                     let selector = self.read_node()?;
                     Ok(FileChangeAction::Rebuild(RebuildAction {
@@ -734,7 +905,16 @@ impl<'a> Parser<'a> {
                         _ => error_received_expected!(next, "QML code"),
                     }
                 }
-                _ if in_slot => error_received_expected!(kw, "INSERT"),
+                _ if matches!(context, InstructionReadingContext::Slot) => {
+                    error_received_expected!(kw, "INSERT")
+                }
+
+                Keyword::Else if matches!(context, InstructionReadingContext::Condition) => {
+                    Ok(FileChangeAction::End(Keyword::Else))
+                }
+                Keyword::Elif if matches!(context, InstructionReadingContext::Condition) => {
+                    Ok(FileChangeAction::End(Keyword::Elif))
+                }
 
                 Keyword::Affect
                 | Keyword::After
@@ -750,21 +930,40 @@ impl<'a> Parser<'a> {
                 | Keyword::Until
                 | Keyword::Located
                 | Keyword::Version
-                | Keyword::At => error_received_expected!(kw, "Directive keyword"),
+                | Keyword::At
+                | Keyword::Else
+                | Keyword::Elif
+                | Keyword::And
+                | Keyword::Or
+                | Keyword::Not
+                | Keyword::Diff
+                | Keyword::Matches
+                | Keyword::Exists => error_received_expected!(kw, "Directive keyword"),
 
                 Keyword::Assert => Ok(FileChangeAction::Assert(self.read_tree()?)),
                 Keyword::End => {
                     let next = self.next_lex()?;
-                    match next {
-                        TokenType::Keyword(Keyword::Traverse)
-                        | TokenType::Keyword(Keyword::Affect)
-                        | TokenType::Keyword(Keyword::Slot)
-                        | TokenType::Keyword(Keyword::Template) => {
-                            Ok(FileChangeAction::End(Keyword::Traverse))
-                        }
-                        _ => error_received_expected!(next, "End-able keyword"),
+                    match next.clone() {
+                        TokenType::Keyword(kw) => match kw {
+                            Keyword::If
+                                if matches!(context, InstructionReadingContext::Condition) =>
+                            {
+                                return Ok(FileChangeAction::End(kw));
+                            }
+
+                            Keyword::Traverse
+                            | Keyword::Affect
+                            | Keyword::Slot
+                            | Keyword::Template => {
+                                return Ok(FileChangeAction::End(Keyword::Traverse));
+                            }
+                            _ => {}
+                        },
+                        _ => {}
                     }
+                    error_received_expected!(next, "End-able keyword")
                 }
+
                 Keyword::Locate => {
                     // LOCATE AFTER <Selector>
                     // LOCATE AFTER ALL
@@ -953,7 +1152,11 @@ impl<'a> Parser<'a> {
                             versions_allowed: versions_allowed.clone(),
                         });
                     }
-                    _ => current_instructions.push(self.read_next_instruction(in_slot)?),
+                    _ => current_instructions.push(self.read_next_instruction(if in_slot {
+                        InstructionReadingContext::Slot
+                    } else {
+                        InstructionReadingContext::Root
+                    })?),
                 }
             } else {
                 // The affected file always needs to be set.

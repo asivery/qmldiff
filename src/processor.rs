@@ -1,14 +1,14 @@
 use std::cell::RefCell;
-use std::mem::take;
+use std::mem::{replace, take};
 use std::rc::Rc;
 use std::usize;
 
 use crate::parser::common::IteratorPipeline;
 use crate::parser::diff::lexer::Keyword;
 use crate::parser::diff::parser::{
-    FileChangeAction, Insertable, LocateRebuildActionSelector, Location, LocationSelector,
-    NodeSelectorObjectType, ObjectToChange, RebuildAction, RebuildInstruction, RemoveRebuildAction,
-    ReplaceRebuildActionWhat,
+    Condition, ConditionRule, FileChangeAction, Insertable, LocateRebuildActionSelector, Location,
+    LocationSelector, NodeSelectorObjectType, ObjectToChange, RebuildAction, RebuildInstruction,
+    RemoveRebuildAction, ReplaceRebuildActionWhat,
 };
 use crate::parser::diff::parser::{NodeSelector, NodeTree, PropRequirement};
 use crate::parser::qml::emitter::{
@@ -28,6 +28,7 @@ use crate::util::common_util::{
 };
 
 use anyhow::{bail, Error, Result};
+use regex::Regex;
 
 use crate::parser::diff::parser::Change;
 
@@ -42,9 +43,11 @@ pub fn find_and_process(
     mut token_stream: Vec<TokenType>,
     diffs: &Vec<Change>,
     slots: &mut Slots,
+    system_version: Option<&String>,
 ) -> Result<(String, usize)> {
     let mut qml: Option<TranslatedTree> = None;
     let mut count = 0;
+    let diff_names = diffs.iter().map(|e| &*e.source).collect::<Vec<&String>>();
     for diff in diffs {
         match &diff.destination {
             ObjectToChange::File(f) if f == file_name => {
@@ -55,7 +58,13 @@ pub fn find_and_process(
                 }
                 count += 1;
                 add_error_source_if_needed(
-                    process(qml.as_mut().unwrap(), diff, slots),
+                    process(
+                        qml.as_mut().unwrap(),
+                        diff,
+                        slots,
+                        &diff_names,
+                        system_version,
+                    ),
                     &diff.source,
                 )?
             }
@@ -1008,14 +1017,43 @@ fn rebuild_child(
     Ok(())
 }
 
-fn process(absolute_root: &mut TranslatedTree, diff: &Change, slots: &mut Slots) -> Result<()> {
+fn process(
+    absolute_root: &mut TranslatedTree,
+    diff: &Change,
+    slots: &mut Slots,
+    diffs_available: &[&String],
+    system_version: Option<&String>,
+) -> Result<()> {
     let mut root_stack: Vec<RootReference> = Vec::new();
     let mut current_root = RootReference {
         root: vec![TreeRoot::Object(absolute_root.root.clone())],
         cursor: None,
         is_replicating: false,
     }; // Start with root as the current root
+    for change in &diff.changes {
+        single_change(
+            absolute_root,
+            &mut root_stack,
+            &mut current_root,
+            change,
+            slots,
+            diffs_available,
+            system_version,
+        )?;
+    }
 
+    Ok(())
+}
+
+fn single_change(
+    absolute_root: &mut TranslatedTree,
+    root_stack: &mut Vec<RootReference>,
+    current_root: &mut RootReference,
+    change: &FileChangeAction,
+    slots: &mut Slots,
+    diffs_available: &[&String],
+    system_version: Option<&String>,
+) -> Result<()> {
     macro_rules! unambiguous_root {
         () => {{
             if current_root.root.len() != 1 {
@@ -1041,68 +1079,68 @@ fn process(absolute_root: &mut TranslatedTree, diff: &Change, slots: &mut Slots)
         }};
     }
 
-    for change in &diff.changes {
-        match change {
-            FileChangeAction::End(Keyword::Traverse) if !current_root.is_replicating => {
-                // Pop the last object from the stack to return to the previous root
-                if let Some(root) = root_stack.pop() {
-                    current_root = root;
-                } else {
-                    return Err(Error::msg("Cannot END TRAVERSE - end of scope!"));
-                }
+    match change {
+        FileChangeAction::End(Keyword::Traverse) if !current_root.is_replicating => {
+            // Pop the last object from the stack to return to the previous root
+            if let Some(root) = root_stack.pop() {
+                *current_root = root;
+            } else {
+                return Err(Error::msg("Cannot END TRAVERSE - end of scope!"));
             }
-            FileChangeAction::End(Keyword::Replicate) if current_root.is_replicating => {
-                if let Some(previous_root) = root_stack.pop() {
-                    // Grab the children
-                    let children_to_merge = {
-                        let fake_root = unambiguous_root!();
-                        match fake_root {
-                            TreeRoot::Object(obj) => take(&mut obj.borrow_mut().children),
-                            _ => unreachable!("Fake root is created as object, always!"),
-                        }
-                    };
-                    current_root = previous_root;
-                    // Merge
-                    let (root, cursor) = unambiguous_root_cursor_set!();
-                    match root {
-                        TreeRoot::Object(obj) => {
-                            obj.borrow_mut()
-                                .children
-                                .splice(cursor..cursor, children_to_merge);
-                        }
-                        _ => {
-                            return Err(Error::msg(
-                                "Cannot END REPLICATE - the old parent is not an object!",
-                            ));
-                        }
+        }
+        FileChangeAction::End(Keyword::Replicate) if current_root.is_replicating => {
+            if let Some(previous_root) = root_stack.pop() {
+                // Grab the children
+                let children_to_merge = {
+                    let fake_root = unambiguous_root!();
+                    match fake_root {
+                        TreeRoot::Object(obj) => take(&mut obj.borrow_mut().children),
+                        _ => unreachable!("Fake root is created as object, always!"),
                     }
-                } else {
-                    return Err(Error::msg("Cannot END REPLICATE - end of scope!"));
-                }
-            }
-            FileChangeAction::End(_) => {
-                return Err(Error::msg("END TRAVERSE / END REPLICATE first!"));
-            }
-            FileChangeAction::Replicate(tree) => {
-                let object = locate_in_tree(current_root.root.clone(), tree, true);
-                if object.len() != 1 {
-                    return Err(Error::msg(format!(
-                        "Cannot locate exactly one elemnt for replication: {}",
-                        tree_to_string(tree)
-                    )));
-                }
-
-                // Push the current root onto the stack and create a new root that will consist of the replicated object
-
-                root_stack.push(current_root);
-                let element = match object.first().unwrap() {
-                    TreeRoot::Child {
-                        parent,
-                        child_index,
-                    } => parent.borrow().children[*child_index].deep_clone(),
-                    _ => unreachable!("force_all_children = true"),
                 };
-                current_root = RootReference {
+                *current_root = previous_root;
+                // Merge
+                let (root, cursor) = unambiguous_root_cursor_set!();
+                match root {
+                    TreeRoot::Object(obj) => {
+                        obj.borrow_mut()
+                            .children
+                            .splice(cursor..cursor, children_to_merge);
+                    }
+                    _ => {
+                        return Err(Error::msg(
+                            "Cannot END REPLICATE - the old parent is not an object!",
+                        ));
+                    }
+                }
+            } else {
+                return Err(Error::msg("Cannot END REPLICATE - end of scope!"));
+            }
+        }
+        FileChangeAction::End(_) => {
+            return Err(Error::msg("END TRAVERSE / END REPLICATE first!"));
+        }
+        FileChangeAction::Replicate(tree) => {
+            let object = locate_in_tree(current_root.root.clone(), tree, true);
+            if object.len() != 1 {
+                return Err(Error::msg(format!(
+                    "Cannot locate exactly one elemnt for replication: {}",
+                    tree_to_string(tree)
+                )));
+            }
+
+            // Push the current root onto the stack and create a new root that will consist of the replicated object
+
+            let element = match object.first().unwrap() {
+                TreeRoot::Child {
+                    parent,
+                    child_index,
+                } => parent.borrow().children[*child_index].deep_clone(),
+                _ => unreachable!("force_all_children = true"),
+            };
+            root_stack.push(replace(
+                current_root,
+                RootReference {
                     root: vec![TreeRoot::Object(Rc::new(RefCell::new(TranslatedObject {
                         name: String::default(),
                         full_name: String::default(),
@@ -1110,257 +1148,348 @@ fn process(absolute_root: &mut TranslatedTree, diff: &Change, slots: &mut Slots)
                     })))],
                     cursor: None,
                     is_replicating: true,
-                }
+                },
+            ));
+        }
+        FileChangeAction::Traverse(tree) => {
+            // Attempt to locate the child object in the current root
+            let object = locate_in_tree(current_root.root.clone(), tree, false);
+            if object.is_empty() {
+                return Err(Error::msg(format!(
+                    "Cannot locate element in tree: {}",
+                    tree_to_string(tree)
+                )));
             }
-            FileChangeAction::Traverse(tree) => {
-                // Attempt to locate the child object in the current root
-                let object = locate_in_tree(current_root.root.clone(), tree, false);
-                if object.is_empty() {
-                    return Err(Error::msg(format!(
-                        "Cannot locate element in tree: {}",
-                        tree_to_string(tree)
-                    )));
-                }
 
-                // Push the current root onto the stack and set the new current root
-                root_stack.push(current_root);
-                current_root = RootReference {
+            // Push the current root onto the stack and set the new current root
+            root_stack.push(replace(
+                current_root,
+                RootReference {
                     root: object,
                     cursor: None,
                     is_replicating: false,
-                };
-            }
-            FileChangeAction::Assert(tree_selector) => {
-                current_root.root.retain(|e| {
-                    // Is the tree selector simple
-                    if tree_selector.len() == 1 && tree_selector[0].is_simple() {
-                        match &e {
-                            TreeRoot::Object(e) => {
-                                for child_object in &e.borrow().children {
-                                    // Yes, and it matches
-                                    if child_object.get_name()
-                                        == Some(&tree_selector[0].object.unwrap_identifier())
-                                    {
-                                        return true;
-                                    }
+                },
+            ));
+        }
+        FileChangeAction::Assert(tree_selector) => {
+            current_root.root.retain(|e| {
+                // Is the tree selector simple
+                if tree_selector.len() == 1 && tree_selector[0].is_simple() {
+                    match &e {
+                        TreeRoot::Object(e) => {
+                            for child_object in &e.borrow().children {
+                                // Yes, and it matches
+                                if child_object.get_name()
+                                    == Some(&tree_selector[0].object.unwrap_identifier())
+                                {
+                                    return true;
                                 }
                             }
-                            TreeRoot::Enum(e) => {
-                                for value in e.values.borrow().iter() {
-                                    if value.0 == *tree_selector[0].object.unwrap_identifier() {
-                                        return true;
-                                    }
-                                }
-                            }
-                            TreeRoot::Child {
-                                parent: _,
-                                child_index: _,
-                            } => traverse_no_raw_children!(),
                         }
+                        TreeRoot::Enum(e) => {
+                            for value in e.values.borrow().iter() {
+                                if value.0 == *tree_selector[0].object.unwrap_identifier() {
+                                    return true;
+                                }
+                            }
+                        }
+                        TreeRoot::Child {
+                            parent: _,
+                            child_index: _,
+                        } => traverse_no_raw_children!(),
                     }
-                    !locate_in_tree(vec![e.clone()], tree_selector, false).is_empty()
-                });
-                if current_root.root.is_empty() {
-                    return Err(Error::msg("ASSERTed all objects out of existence"));
                 }
+                !locate_in_tree(vec![e.clone()], tree_selector, false).is_empty()
+            });
+            if current_root.root.is_empty() {
+                return Err(Error::msg("ASSERTed all objects out of existence"));
             }
-            FileChangeAction::Insert(insertable) => {
-                // Object starts with { -> To convert into Object, concat with "Object"
-                if let Some(code) = match insertable {
-                    Insertable::Code(code) => Some(code),
+        }
+        FileChangeAction::Insert(insertable) => {
+            // Object starts with { -> To convert into Object, concat with "Object"
+            if let Some(code) = match insertable {
+                Insertable::Code(code) => Some(code),
+                Insertable::Slot(_) => {
+                    panic!("Cannot insert slot! Use `process_slots()` first!")
+                }
+                Insertable::Template(_, _) => {
+                    panic!("Cannot insert template! Use `process_templates()` first!")
+                }
+            } {
+                let (root, mut cursor) = unambiguous_root_cursor_set!();
+                insert_into_root(&mut cursor, root, code, slots)?;
+                current_root.cursor = Some(cursor);
+            }
+        }
+        FileChangeAction::Locate(location) => {
+            let root = unambiguous_root!();
+            current_root.cursor = Some(match &location.selector {
+                LocationSelector::All => match location.location {
+                    Location::Before => 0,
+                    Location::After => match root {
+                        TreeRoot::Enum(r#enum) => r#enum.values.borrow().len(),
+                        TreeRoot::Object(root) => root.borrow().children.len(),
+                        TreeRoot::Child {
+                            parent: _,
+                            child_index: _,
+                        } => traverse_no_raw_children!(),
+                    },
+                },
+                LocationSelector::Tree(tree) => {
+                    let element_idx = find_first_matching_child(root, tree)?;
+
+                    match location.location {
+                        Location::After => element_idx + 1,
+                        Location::Before => element_idx,
+                    }
+                }
+            });
+        }
+        FileChangeAction::Replace(replacer) => {
+            let root = unambiguous_root!();
+            let mut element_idx = find_first_matching_child(root, &replacer.selector)?;
+            match root {
+                TreeRoot::Object(obj) => {
+                    obj.borrow_mut().children.remove(element_idx);
+                }
+                TreeRoot::Enum(r#enum) => {
+                    r#enum.values.borrow_mut().remove(element_idx);
+                }
+                TreeRoot::Child {
+                    parent: _,
+                    child_index: _,
+                } => traverse_no_raw_children!(),
+            };
+            insert_into_root(
+                &mut element_idx,
+                root,
+                match &replacer.content {
+                    Insertable::Code(code) => code,
                     Insertable::Slot(_) => {
                         panic!("Cannot insert slot! Use `process_slots()` first!")
                     }
                     Insertable::Template(_, _) => {
-                        panic!("Cannot insert template! Use `process_templates()` first!")
+                        panic!("Cannot insert template! Use `process_slots()` first!")
                     }
-                } {
-                    let (root, mut cursor) = unambiguous_root_cursor_set!();
-                    insert_into_root(&mut cursor, root, code, slots)?;
-                    current_root.cursor = Some(cursor);
+                },
+                slots,
+            )?;
+            current_root.cursor = Some(element_idx);
+        }
+        FileChangeAction::Rename(rename) => {
+            let root = unambiguous_root!();
+            let element_idx = find_first_matching_child(root, &rename.selector)?;
+            match root {
+                TreeRoot::Enum(_) => {
+                    return Err(Error::msg("Cannot RENAME a value within an enum!"))
                 }
-            }
-            FileChangeAction::Locate(location) => {
-                let root = unambiguous_root!();
-                current_root.cursor = Some(match &location.selector {
-                    LocationSelector::All => match location.location {
-                        Location::Before => 0,
-                        Location::After => match root {
-                            TreeRoot::Enum(r#enum) => r#enum.values.borrow().len(),
-                            TreeRoot::Object(root) => root.borrow().children.len(),
-                            TreeRoot::Child {
-                                parent: _,
-                                child_index: _,
-                            } => traverse_no_raw_children!(),
-                        },
-                    },
-                    LocationSelector::Tree(tree) => {
-                        let element_idx = find_first_matching_child(root, tree)?;
-
-                        match location.location {
-                            Location::After => element_idx + 1,
-                            Location::Before => element_idx,
-                        }
-                    }
-                });
-            }
-            FileChangeAction::Replace(replacer) => {
-                let root = unambiguous_root!();
-                let mut element_idx = find_first_matching_child(root, &replacer.selector)?;
-                match root {
-                    TreeRoot::Object(obj) => {
-                        obj.borrow_mut().children.remove(element_idx);
-                    }
-                    TreeRoot::Enum(r#enum) => {
-                        r#enum.values.borrow_mut().remove(element_idx);
-                    }
-                    TreeRoot::Child {
-                        parent: _,
-                        child_index: _,
-                    } => traverse_no_raw_children!(),
-                };
-                insert_into_root(
-                    &mut element_idx,
-                    root,
-                    match &replacer.content {
-                        Insertable::Code(code) => code,
-                        Insertable::Slot(_) => {
-                            panic!("Cannot insert slot! Use `process_slots()` first!")
-                        }
-                        Insertable::Template(_, _) => {
-                            panic!("Cannot insert template! Use `process_slots()` first!")
-                        }
-                    },
-                    slots,
-                )?;
-                current_root.cursor = Some(element_idx);
-            }
-            FileChangeAction::Rename(rename) => {
-                let root = unambiguous_root!();
-                let element_idx = find_first_matching_child(root, &rename.selector)?;
-                match root {
-                    TreeRoot::Enum(_) => {
-                        return Err(Error::msg("Cannot RENAME a value within an enum!"))
-                    }
-                    TreeRoot::Object(obj) => {
-                        obj.borrow_mut().children[element_idx].set_name(rename.name_to.clone())?;
-                    }
-                    TreeRoot::Child {
-                        parent: _,
-                        child_index: _,
-                    } => traverse_no_raw_children!(),
+                TreeRoot::Object(obj) => {
+                    obj.borrow_mut().children[element_idx].set_name(rename.name_to.clone())?;
                 }
-                current_root.cursor = Some(element_idx + 1);
+                TreeRoot::Child {
+                    parent: _,
+                    child_index: _,
+                } => traverse_no_raw_children!(),
             }
-            FileChangeAction::Remove(selector) => {
-                // Root must be unambiguous
-                match unambiguous_root!() {
-                    TreeRoot::Object(obj) => {
-                        obj.borrow_mut().children.retain(|e| {
-                            if selector.is_simple() {
-                                // Might be a generic prop.
-                                if e.get_name() == Some(&selector.object.unwrap_identifier()) {
-                                    return false;
-                                }
+            current_root.cursor = Some(element_idx + 1);
+        }
+        FileChangeAction::Remove(selector) => {
+            // Root must be unambiguous
+            match unambiguous_root!() {
+                TreeRoot::Object(obj) => {
+                    obj.borrow_mut().children.retain(|e| {
+                        if selector.is_simple() {
+                            // Might be a generic prop.
+                            if e.get_name() == Some(&selector.object.unwrap_identifier()) {
+                                return false;
                             }
+                        }
 
-                            // Complex object. Delve deeper.
-                            match e {
-                                TranslatedObjectChild::Object(e) => {
-                                    !does_match_non_wildcard(&e.borrow(), selector, None)
-                                }
-                                TranslatedObjectChild::ObjectAssignment(e) => {
-                                    !does_match_non_wildcard(
-                                        &e.value.borrow(),
-                                        selector,
-                                        Some(&e.name),
-                                    )
-                                }
-                                _ => true, // Retain all else!
+                        // Complex object. Delve deeper.
+                        match e {
+                            TranslatedObjectChild::Object(e) => {
+                                !does_match_non_wildcard(&e.borrow(), selector, None)
                             }
-                        });
-                    }
-                    TreeRoot::Enum(r#enum) => {
-                        if !selector.is_simple() {
-                            return Err(Error::msg("Cannot do precision removal in enum."));
+                            TranslatedObjectChild::ObjectAssignment(e) => {
+                                !does_match_non_wildcard(&e.value.borrow(), selector, Some(&e.name))
+                            }
+                            _ => true, // Retain all else!
                         }
-                        r#enum
-                            .values
-                            .borrow_mut()
-                            .retain(|e| e.0 != *selector.object.unwrap_identifier());
-                    }
-                    TreeRoot::Child {
-                        parent: _,
-                        child_index: _,
-                    } => traverse_no_raw_children!(),
+                    });
                 }
+                TreeRoot::Enum(r#enum) => {
+                    if !selector.is_simple() {
+                        return Err(Error::msg("Cannot do precision removal in enum."));
+                    }
+                    r#enum
+                        .values
+                        .borrow_mut()
+                        .retain(|e| e.0 != *selector.object.unwrap_identifier());
+                }
+                TreeRoot::Child {
+                    parent: _,
+                    child_index: _,
+                } => traverse_no_raw_children!(),
             }
-            FileChangeAction::AddImport(import) => {
-                if !root_stack.is_empty() {
-                    return Err(Error::msg(
-                        "Cannot use import within TRAVERSE / SLOT statements!",
-                    ));
+        }
+        FileChangeAction::AddImport(import) => {
+            if !root_stack.is_empty() {
+                return Err(Error::msg(
+                    "Cannot use import within TRAVERSE / SLOT statements!",
+                ));
+            }
+            // Have we imported it before?
+            if let Some(TreeElement::Import(existing_import)) =
+                absolute_root.leftovers.iter_mut().find(|e| {
+                    if let TreeElement::Import(e) = e {
+                        e.object_name == import.name
+                    } else {
+                        false
+                    }
+                })
+            {
+                if existing_import.version.is_none() {
+                    // Force the version
+                    existing_import.version = Some(import.version.clone());
                 }
-                // Have we imported it before?
-                if let Some(TreeElement::Import(existing_import)) =
-                    absolute_root.leftovers.iter_mut().find(|e| {
-                        if let TreeElement::Import(e) = e {
-                            e.object_name == import.name
-                        } else {
-                            false
-                        }
-                    })
+                // We have. Is it the same alias / version?
+                if existing_import.alias != import.alias
+                    || existing_import.version.as_ref().unwrap() != &import.version
                 {
-                    if existing_import.version.is_none() {
-                        // Force the version
-                        existing_import.version = Some(import.version.clone());
+                    // No - this is an error
+                    return Err(Error::msg(format!("Cannot import the same element ({}) with two different versions ({}, {}), or different aliases({:?}, {:?})", import.name, import.version, existing_import.version.as_ref().unwrap(), import.alias, existing_import.alias)));
+                }
+                // Yes, it's the same version. Do not duplicate it. Drop the redundant statement.
+            } else {
+                absolute_root.leftovers.push(TreeElement::Import(Import {
+                    alias: import.alias.clone(),
+                    object_name: import.name.clone(),
+                    version: Some(import.version.clone()),
+                }));
+            }
+        }
+        FileChangeAction::Rebuild(rebuild) => {
+            let root = unambiguous_root!();
+            let element_idx = find_first_matching_child(root, &vec![rebuild.selector.clone()])?;
+            match root {
+                TreeRoot::Enum(_) => {
+                    return Err(Error::msg("Cannot rebuild an enum!"));
+                }
+                TreeRoot::Object(obj) => {
+                    if rebuild.redefine {
+                        let child = obj.borrow_mut().children.remove(element_idx);
+                        let new_children = redefine_child(rebuild, child)?;
+                        obj.borrow_mut()
+                            .children
+                            .splice(element_idx..element_idx, new_children.into_iter());
+                    } else {
+                        let child_reference = &mut obj.borrow_mut().children[element_idx];
+                        rebuild_child(rebuild, child_reference)?;
                     }
-                    // We have. Is it the same alias / version?
-                    if existing_import.alias != import.alias
-                        || existing_import.version.as_ref().unwrap() != &import.version
-                    {
-                        // No - this is an error
-                        return Err(Error::msg(format!("Cannot import the same element ({}) with two different versions ({}, {}), or different aliases({:?}, {:?})", import.name, import.version, existing_import.version.as_ref().unwrap(), import.alias, existing_import.alias)));
+                }
+                TreeRoot::Child {
+                    parent: _,
+                    child_index: _,
+                } => traverse_no_raw_children!(),
+            };
+        }
+        FileChangeAction::AllowMultiple => {
+            return Err(Error::msg("Not supported yet!"));
+        }
+        FileChangeAction::ConditionalBranch(cbr) => {
+            for (condition, code) in &cbr.conditions {
+                if condition.matches(unambiguous_root!(), slots, diffs_available, system_version) {
+                    for entry in code {
+                        single_change(
+                            absolute_root,
+                            root_stack,
+                            current_root,
+                            entry,
+                            slots,
+                            diffs_available,
+                            system_version,
+                        )?;
                     }
-                    // Yes, it's the same version. Do not duplicate it. Drop the redundant statement.
-                } else {
-                    absolute_root.leftovers.push(TreeElement::Import(Import {
-                        alias: import.alias.clone(),
-                        object_name: import.name.clone(),
-                        version: Some(import.version.clone()),
-                    }));
+                    return Ok(());
                 }
             }
-            FileChangeAction::Rebuild(rebuild) => {
-                let root = unambiguous_root!();
-                let element_idx = find_first_matching_child(root, &vec![rebuild.selector.clone()])?;
-                match root {
-                    TreeRoot::Enum(_) => {
-                        return Err(Error::msg("Cannot rebuild an enum!"));
-                    }
-                    TreeRoot::Object(obj) => {
-                        if rebuild.redefine {
-                            let child = obj.borrow_mut().children.remove(element_idx);
-                            let new_children = redefine_child(rebuild, child)?;
-                            obj.borrow_mut()
-                                .children
-                                .splice(element_idx..element_idx, new_children.into_iter());
-                        } else {
-                            let child_reference = &mut obj.borrow_mut().children[element_idx];
-                            rebuild_child(rebuild, child_reference)?;
-                        }
-                    }
-                    TreeRoot::Child {
-                        parent: _,
-                        child_index: _,
-                    } => traverse_no_raw_children!(),
-                };
-            }
-            FileChangeAction::AllowMultiple => {
-                return Err(Error::msg("Not supported yet!"));
+
+            // Run the 'else'
+            if let Some(fallback) = &cbr.default_fallthrough {
+                for entry in fallback {
+                    single_change(
+                        absolute_root,
+                        root_stack,
+                        current_root,
+                        entry,
+                        slots,
+                        diffs_available,
+                        system_version,
+                    )?;
+                }
             }
         }
     }
 
     Ok(())
+}
+
+impl Condition {
+    fn matches(
+        &self,
+        tree: &TreeRoot,
+        slots: &Slots,
+        diffs_available: &[&String],
+        system_version: Option<&String>,
+    ) -> bool {
+        match self {
+            Condition::Yes => true,
+            Condition::And(a, b) => {
+                a.matches(tree, slots, diffs_available, system_version)
+                    && b.matches(tree, slots, diffs_available, system_version)
+            }
+            Condition::Or(a, b) => {
+                a.matches(tree, slots, diffs_available, system_version)
+                    || b.matches(tree, slots, diffs_available, system_version)
+            }
+            Condition::Rule(r) => r.matches(tree, slots, diffs_available, system_version),
+        }
+    }
+}
+
+impl ConditionRule {
+    fn matches(
+        &self,
+        tree: &TreeRoot,
+        slots: &Slots,
+        diffs_available: &[&String],
+        system_version: Option<&String>,
+    ) -> bool {
+        match self {
+            ConditionRule::Exists(ns) => find_first_matching_child(tree, ns).is_ok(),
+            ConditionRule::HasSlot(slot_name) => slots.0.contains_key(slot_name),
+            ConditionRule::HasDiff(diff_name) => diffs_available.contains(&diff_name),
+            ConditionRule::Negated(x) => !x.matches(tree, slots, diffs_available, system_version),
+            ConditionRule::Subcondition(sc) => {
+                sc.matches(tree, slots, diffs_available, system_version)
+            }
+            ConditionRule::SystemVersionMatches { version, is_regex } => {
+                if let Some(version_provided) = system_version {
+                    if *is_regex {
+                        match Regex::new(version) {
+                            Ok(rgs) => rgs.is_match(version_provided),
+                            Err(e) => {
+                                println!("Failed to parse regex {version} for system checking condition! ({e:?})");
+                                false
+                            }
+                        }
+                    } else {
+                        version_provided == version
+                    }
+                } else {
+                    false
+                }
+            }
+        }
+    }
 }

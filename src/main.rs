@@ -184,6 +184,7 @@ fn main() {
                 *flatten,
                 &mut slots,
                 &changes,
+                version.as_ref(),
             )
             .unwrap();
             let not_read_slots: Vec<&String> = slots

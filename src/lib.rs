@@ -305,7 +305,8 @@ pub unsafe extern "C" fn qmldiff_process_file(
     } else {
         &mut SLOTS.lock().unwrap()
     };
-    match find_and_process(&file_name, tree, &changes, slots) {
+    let sys_version = CURRENT_VERSION.lock().unwrap().clone();
+    match find_and_process(&file_name, tree, &changes, slots, sys_version.as_ref()) {
         Ok((emitted, _count)) => {
             let emitted_string = CString::new(emitted).unwrap();
             let ret = emitted_string.as_ptr();

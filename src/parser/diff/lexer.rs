@@ -7,7 +7,7 @@ use crate::parser::{
     qml,
 };
 
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum Keyword {
     Affect,
     Traverse,
@@ -40,6 +40,19 @@ pub enum Keyword {
     Located,
     Rebuild,
     Redefine,
+
+    // Conditionals
+    If,
+    Else,
+    Elif,
+
+    And,
+    Or,
+    Not,
+
+    Exists,
+    Matches,
+    Diff,
 }
 
 impl Display for Keyword {
@@ -74,6 +87,18 @@ impl Display for Keyword {
             Self::Located => "LOCATED",
             Self::Rebuild => "REBUILD",
             Self::Redefine => "REDEFINE",
+
+            Self::If => "IF",
+            Self::Else => "ELSE",
+            Self::Elif => "ELIF",
+
+            Self::And => "AND",
+            Self::Or => "OR",
+            Self::Not => "NOT",
+
+            Self::Exists => "EXISTS",
+            Self::Matches => "MATCHES",
+            Self::Diff => "DIFF",
         }))
     }
 }
@@ -112,6 +137,19 @@ impl TryFrom<&str> for Keyword {
             "LOCATED" => Ok(Self::Located),
             "REBUILD" => Ok(Self::Rebuild),
             "REDEFINE" => Ok(Self::Redefine),
+
+            "IF" => Ok(Self::If),
+            "ELSE" => Ok(Self::Else),
+            "ELIF" => Ok(Self::Elif),
+
+            "AND" => Ok(Self::And),
+            "OR" => Ok(Self::Or),
+            "NOT" => Ok(Self::Not),
+
+            "EXISTS" => Ok(Self::Exists),
+            "MATCHES" => Ok(Self::Matches),
+            "DIFF" => Ok(Self::Diff),
+
             _ => Err(anyhow::Error::msg(format!("Invalid keyword: {}", value))),
         }
     }
@@ -281,8 +319,8 @@ impl Lexer {
                 }
 
                 //       Child-of    Prop.EQ        ID      p.named | Others
-                // Prop.v      Contains    Traversal     Name       |      Wildcard
-                '[' | ']' | '>' | '~' | '=' | '/' | '#' | ':' | '!' | '.' | '?' => {
+                // Prop.v      Contains    Traversal     Name       |      Wildcard   Order of parsing of logic expr.
+                '[' | ']' | '>' | '~' | '=' | '/' | '#' | ':' | '!' | '.' | '?'      | '(' | ')' => {
                     let symbol = self.stream.advance().unwrap();
                     Ok(TokenType::Symbol(symbol))
                 }

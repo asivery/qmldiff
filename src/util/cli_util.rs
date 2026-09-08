@@ -284,6 +284,7 @@ pub fn apply_changes(
     flatten: bool,
     slots: &mut Slots,
     changes: &Vec<Change>,
+    system_version: Option<&String>,
 ) -> Result<()> {
     let file_set = changes
         .iter()
@@ -311,7 +312,8 @@ pub fn apply_changes(
             }
         };
         let tree = tokenize_qml(file_contents, &file_to_edit, None, None);
-        let (emitted, count) = find_and_process(file_to_edit, tree, changes, slots)?;
+        let (emitted, count) =
+            find_and_process(file_to_edit, tree, changes, slots, system_version)?;
 
         // Rewrite the file in destination
         let destination_path = if flatten {
