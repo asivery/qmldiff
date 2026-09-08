@@ -353,6 +353,14 @@ Updates the cursor to after the renamed element.
 This statement can only be used within the direct scope of the `AFFECT` block (i.e. Not in a `SLOT` or `TRAVERSE` block).
 It adds an import to the top of the QML file.
 
+#### `INFO <string>`
+
+This statement displays the string provided in the development console of the application qmldiff is running in.
+
+#### `ERROR <string>`
+
+This statement is similar to `INFO`, but after displaying the string, it crashes the program.
+
 #### `REBUILD <property>` / `REDEFINE <property>`
 
 This statement is only valid for JS functions, object and non-object assignments, object and non-object properties and objects themselves. It rebuilds the token stream the value consists of.

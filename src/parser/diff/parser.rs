@@ -212,6 +212,9 @@ pub enum FileChangeAction {
     Rebuild(RebuildAction),
     Replicate(NodeTree),
     ConditionalBranch(ConditionalBranch),
+
+    Info(String),
+    Error(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -500,7 +503,9 @@ impl<'a> Parser<'a> {
                     | Keyword::Not
                     | Keyword::Matches
                     | Keyword::Diff
-                    | Keyword::Exists => {
+                    | Keyword::Exists
+                    | Keyword::Info
+                    | Keyword::Error_ => {
                         return error_received_expected!(kw, "Rebuild directive keyword");
                     }
 
@@ -823,6 +828,8 @@ impl<'a> Parser<'a> {
         let next = self.next_lex()?;
         if let TokenType::Keyword(kw) = next {
             match kw {
+                Keyword::Error_ => Ok(FileChangeAction::Error(self.next_string_or_id()?)),
+                Keyword::Info => Ok(FileChangeAction::Info(self.next_string_or_id()?)),
                 Keyword::If => Ok(FileChangeAction::ConditionalBranch(
                     self.read_conditional_branch()?,
                 )),

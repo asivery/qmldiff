@@ -1429,6 +1429,8 @@ fn single_change(
                 }
             }
         }
+        FileChangeAction::Info(info) => println!("[qmldiff]: INFO: {info}"),
+        FileChangeAction::Error(info) => panic!("[qmldiff]: ERROR: {info}")
     }
 
     Ok(())

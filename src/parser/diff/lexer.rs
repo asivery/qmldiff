@@ -53,6 +53,9 @@ pub enum Keyword {
     Exists,
     Matches,
     Diff,
+
+    Info,
+    Error_,
 }
 
 impl Display for Keyword {
@@ -99,6 +102,9 @@ impl Display for Keyword {
             Self::Exists => "EXISTS",
             Self::Matches => "MATCHES",
             Self::Diff => "DIFF",
+
+            Self::Info => "INFO",
+            Self::Error_ => "ERROR",
         }))
     }
 }
@@ -149,6 +155,9 @@ impl TryFrom<&str> for Keyword {
             "EXISTS" => Ok(Self::Exists),
             "MATCHES" => Ok(Self::Matches),
             "DIFF" => Ok(Self::Diff),
+
+            "INFO" => Ok(Self::Info),
+            "ERROR" => Ok(Self::Error_),
 
             _ => Err(anyhow::Error::msg(format!("Invalid keyword: {}", value))),
         }
