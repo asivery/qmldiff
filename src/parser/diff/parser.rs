@@ -802,6 +802,11 @@ impl<'a> Parser<'a> {
                                 take(&mut current_instruction_list),
                             ))
                         }
+                        Keyword::Affect | Keyword::Slot | Keyword::Template => {
+                            // Since IFs can only exist within AFFECT blocks, terminating the AFFECT
+                            // would cause the if to extend out of an affect block, which is illegal
+                            return error_received_expected!(TokenType::Keyword(x), "ELSE / ELIF / END IF");
+                        }
 
                         anything => current_instruction_list.push(FileChangeAction::End(anything)),
                     }
